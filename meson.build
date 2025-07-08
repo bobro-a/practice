@@ -1,6 +1,6 @@
 project(
   'xdg-dbus-proxy',
-  'c',
+  ['c','cpp'],
   version : '0.1.6',
   meson_version : '>=0.49.0',
   default_options : [
@@ -76,6 +76,7 @@ dbus_proxy = executable(
   [
     'dbus-proxy.c',
     'flatpak-proxy.c',
+    'dbus-proxy.cpp',
   ],
   install : true,
   install_dir : bindir,
