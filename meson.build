@@ -5,6 +5,7 @@ project(
   meson_version : '>=0.49.0',
   default_options : [
     'warning_level=2',
+    'cpp_std=c++20',
   ],
 )
 
@@ -49,7 +50,8 @@ add_project_arguments(
 glib_dep = dependency('glib-2.0', version : '>=2.40')
 gio_dep = dependency('gio-2.0', version : '>=2.40')
 gio_unix_dep = dependency('gio-unix-2.0', version : '>=2.40')
-common_deps = [glib_dep, gio_dep, gio_unix_dep]
+glibmm_dep = dependency('glibmm-2.4', required: true)
+common_deps = [glib_dep, gio_dep, gio_unix_dep, glibmm_dep]
 
 if meson.is_subproject()
   bindir = get_option('libexecdir')
@@ -77,6 +79,7 @@ dbus_proxy = executable(
     'dbus-proxy.c',
     'flatpak-proxy.c',
     'dbus-proxy.cpp',
+#    'flatpak-proxy.cpp',
   ],
   install : true,
   install_dir : bindir,
