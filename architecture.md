@@ -90,6 +90,15 @@ classDiagram
         +Buffer header_buffer
         +unordered_map<uint32_t,shared_ptr<>> expected_replies
         }
+    class Filter{
+        +string name
+        +bool name_is_subtree
+        +FlatpakPolicy policy
+        +FilterTypeMask types;
+    }
+    class FilterTypeMask{
+
+    }
 
     FlatpakProxyClient *-- ProxySide
     FlatpakProxyClient --> FlatpakProxy
@@ -97,5 +106,7 @@ classDiagram
     ProxySide --> FlatpakProxyClient
     ProxySide --> Buffer
     ProxySide *-- Buffer
+    Filter --> FilterTypeMask
+    
 :::
 ![class diagram](diagram.png)
