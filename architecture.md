@@ -98,3 +98,4 @@ classDiagram
     ProxySide --> Buffer
     ProxySide *-- Buffer
 :::
+![class diagram](diagram.png)
