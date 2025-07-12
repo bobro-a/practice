@@ -3,6 +3,11 @@
 #include <unordered_map>
 #include <string>
 #include <vector>
+#include <list>
+#include <glibmm.h>
+#include <giomm/init.h>
+#include <giomm/socketservice.h>
+
 
 typedef enum {
     FILTER_TYPE_CALL = 1 << 0,
@@ -40,13 +45,14 @@ class FlatpakProxyClient{
 
 class FlatpakProxy {
 public:
-    FlatpakProxy();
+    FlatpakProxy(std::string dbus_address,std::string socket_path);
 
     ~FlatpakProxy();
 
 private:
     bool log_messages;
-//    GList         *clients;
+    Glib::RefPtr<Gio::SocketService> parent;
+    std::list<FlatpakProxyClient*> *clients;
     std::string socket_path;
     std::string dbus_address;
     bool filter;

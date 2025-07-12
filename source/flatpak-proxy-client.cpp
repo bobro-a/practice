@@ -1,5 +1,5 @@
 #include "headers/flatpak-proxy-client.h"
-
+#include <cassert>
 
 void FlatpakProxy::set_filter(bool filter) {
     this->filter = filter;
@@ -38,6 +38,11 @@ void FlatpakProxy::add_broadcast_rule(std::string name, bool name_is_subtree, st
 }
 
 FlatpakProxy::~FlatpakProxy() {
+    assert(clients->empty());
+    filters.clear();
+    //todo will finish
+}
+FlatpakProxy::FlatpakProxy(std::string dbus_address,std::string socket_path){
 
 }
 
