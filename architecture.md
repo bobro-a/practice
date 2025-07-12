@@ -1,28 +1,28 @@
-::: mermaid
+<pre><code>```mermaid 
 classDiagram
     class FlatpakProxy{
         +FlatpakProxy()
         +~FlatpakProxy()
-        +set_filter()
-        +set_sloppy_names()
-        +set_log_messages()
-        +add_filter()
-        +add_policy()
-        +add_call_rule()
-        +add_broadcast_rule()
+        -set_filter()
+        -set_sloppy_names()
+        -set_log_messages()
+        -add_filter()
+        -add_policy()
+        -add_call_rule()
+        -add_broadcast_rule()
         -finalizer()
         -set_property()
-        +get_property()
-        +proxy_start()
-        +proxy_stop()
-        +socket parent
-        +bool log_messages
-        +list clients
-        +string socket_path
-        +string dbus_address
-        +bool filters
-        +bool sloopy_names
-        +unordered_map filters
+        -get_property()
+        -proxy_start()
+        -proxy_stop()
+        -socket parent
+        -bool log_messages
+        -list clients
+        -string socket_path
+        -string dbus_address
+        -bool filters
+        -bool sloopy_names
+        -unordered_map filters
     }
     class Buffer{
         +size_t size
@@ -91,14 +91,27 @@ classDiagram
         +unordered_map<uint32_t,shared_ptr<>> expected_replies
         }
     class Filter{
+        +Filter()
         +string name
         +bool name_is_subtree
         +FlatpakPolicy policy
-        +FilterTypeMask types;
+        -FilterTypeMask types;
+        -string path;
+        -bool path_is_subtree;
+        -string interface;
+        -string member;
     }
-    class FilterTypeMask{
+    class FilterTypeMask { <<enumeration>> 
+    FILTER_TYPE_CALL
+    FILTER_TYPE_BROADCAST
+    FILTER_TYPE_ALL 
+    } 
 
-    }
+    class FlatpakPolicy { <<enumeration>> 
+    FLATPAK_POLICY_NONE
+    FLATPAK_POLICY_SEE
+    FLATPAK_POLICY_TALK FLATPAK_POLICY_OWN 
+    } 
 
     FlatpakProxyClient *-- ProxySide
     FlatpakProxyClient --> FlatpakProxy
@@ -107,6 +120,5 @@ classDiagram
     ProxySide --> Buffer
     ProxySide *-- Buffer
     Filter --> FilterTypeMask
-    
-:::
-![class diagram](diagram.png)
+    Filter --> FlatpakPolicy
+  ```</code></pre>
