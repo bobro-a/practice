@@ -1,4 +1,4 @@
-<pre><code>```mermaid 
+```mermaid 
 classDiagram
     class FlatpakProxy{
         +FlatpakProxy()
@@ -121,4 +121,4 @@ classDiagram
     ProxySide *-- Buffer
     Filter --> FilterTypeMask
     Filter --> FlatpakPolicy
-  ```</code></pre>
+  ```
