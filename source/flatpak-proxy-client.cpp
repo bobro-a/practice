@@ -21,30 +21,47 @@ void
 FlatpakProxy::add_policy(std::string name,
                          bool name_is_subtree,
                          FlatpakPolicy policy) {
-    Filter *filter = new Filter(name, name_is_subtree, policy); //todo clear
+    Filter *filter = new Filter(name, name_is_subtree, policy);
     this->add_filter(filter);
 }
 
 
 void FlatpakProxy::add_call_rule(std::string name, bool name_is_subtree, std::string rule) {
-    Filter *filter = new Filter(name, name_is_subtree, FILTER_TYPE_CALL, rule);//todo clear
+    Filter *filter = new Filter(name, name_is_subtree, FILTER_TYPE_CALL, rule);
     this->add_filter(filter);
 }
 
 
 void FlatpakProxy::add_broadcast_rule(std::string name, bool name_is_subtree, std::string rule) {
-    Filter *filter = new Filter(name, name_is_subtree, FILTER_TYPE_BROADCAST, rule);//todo clear
+    Filter *filter = new Filter(name, name_is_subtree, FILTER_TYPE_BROADCAST, rule);
     this->add_filter(filter);
 }
 
 FlatpakProxy::~FlatpakProxy() {
+    if (Glib::RefPtr<Gio::SocketService> service=parent){
+        if (service->is_active()){
+            ::unlink(socket_path.c_str());
+        }
+    }
     assert(clients->empty());
+    delete clients;
+    for (auto &[_,v]:filters){
+        for (auto f:v){
+            delete f;
+        }
+    }
     filters.clear();
-    //todo will finish
 }
-FlatpakProxy::FlatpakProxy(std::string dbus_address,std::string socket_path){
 
+FlatpakProxy::FlatpakProxy(std::string dbus_address,std::string socket_path){
+    this->dbus_address=dbus_address;
+    this->socket_path=socket_path;
+    log_messages=filter=sloppy_names=false;
+    parent=Gio::SocketService::create();
+    add_policy("org.freedesktop.DBus", false, FLATPAK_POLICY_TALK);
+    clients=new std::list<FlatpakProxyClient*>;
 }
+
 
 Filter::Filter(std::string name, bool name_is_subtree, FlatpakPolicy policy) {
     this->name = name;
