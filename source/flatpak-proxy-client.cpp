@@ -1,5 +1,7 @@
 #include "headers/flatpak-proxy-client.h"
 #include <cassert>
+#include <filesystem>
+#include <iostream>
 
 void FlatpakProxy::set_filter(bool filter) {
     this->filter = filter;
@@ -37,29 +39,74 @@ void FlatpakProxy::add_broadcast_rule(std::string name, bool name_is_subtree, st
     this->add_filter(filter);
 }
 
+
+bool FlatpakProxy::start() {
+    std::filesystem::remove(socket_path);
+
+    GError *error = nullptr;
+    GSocketAddress *address = g_unix_socket_address_new(socket_path.c_str());
+    GSocketListener *listener = G_SOCKET_LISTENER(parent->gobj());
+
+    gboolean ok = g_socket_listener_add_address(
+            listener,
+            address,
+            G_SOCKET_TYPE_STREAM,
+            G_SOCKET_PROTOCOL_DEFAULT,
+            nullptr,
+            nullptr,
+            &error
+    );
+    g_object_unref(address);
+
+    if (!ok) {
+        std::cerr << "Ошибка добавления адреса: " << error->message << "\n";
+        g_error_free(error);
+        return false;
+    }
+    parent->signal_incoming().connect(
+            sigc::mem_fun(*this, &FlatpakProxy::incoming_connection)
+    );
+    parent->start();
+    return true;
+}
+
+void FlatpakProxy::stop() {
+    std::filesystem::remove(socket_path);
+    parent->stop();
+}
+
+bool FlatpakProxy::incoming_connection(
+        const Glib::RefPtr<Gio::SocketConnection> &connection,
+        const Glib::RefPtr<Glib::Object> &source_object
+) {
+    connection->get_socket()->set_blocking(false);
+    //todo create FlatpakProxyClient
+    return true;
+}
+
 FlatpakProxy::~FlatpakProxy() {
-    if (Glib::RefPtr<Gio::SocketService> service=parent){
-        if (service->is_active()){
+    if (Glib::RefPtr<Gio::SocketService> service = parent) {
+        if (service->is_active()) {
             ::unlink(socket_path.c_str());
         }
     }
     assert(clients->empty());
     delete clients;
-    for (auto &[_,v]:filters){
-        for (auto f:v){
+    for (auto &[_, v]: filters) {
+        for (auto f: v) {
             delete f;
         }
     }
     filters.clear();
 }
 
-FlatpakProxy::FlatpakProxy(std::string dbus_address,std::string socket_path){
-    this->dbus_address=dbus_address;
-    this->socket_path=socket_path;
-    log_messages=filter=sloppy_names=false;
-    parent=Gio::SocketService::create();
+FlatpakProxy::FlatpakProxy(std::string dbus_address, std::string socket_path) {
+    this->dbus_address = dbus_address;
+    this->socket_path = socket_path;
+    log_messages = filter = sloppy_names = false;
+    parent = Gio::SocketService::create();
     add_policy("org.freedesktop.DBus", false, FLATPAK_POLICY_TALK);
-    clients=new std::list<FlatpakProxyClient*>;
+    clients = new std::list<FlatpakProxyClient *>;
 }
 
 
@@ -100,5 +147,21 @@ Filter::Filter(std::string name, bool name_is_subtree, FilterTypeMask types, std
             }
         }
     }
+}
+
+
+FlatpakProxyClient::FlatpakProxyClient(FlatpakProxy* proxy,
+        Glib::RefPtr<Gio::SocketConnection> client_conn):
+        proxy(proxy),
+        auth_state(AuthState::AUTH_WAITING_FOR_BEGIN),
+        auth_requests(0),
+        auth_replies(0),
+        hello_serial(0),
+        last_fake_serial(0xFFFFFFFF - 65536){
+
+}
+
+FlatpakProxyClient::~FlatpakProxyClient() {
+
 }
 

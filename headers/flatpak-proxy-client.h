@@ -7,20 +7,27 @@
 #include <glibmm.h>
 #include <giomm/init.h>
 #include <giomm/socketservice.h>
+#include "flatpak-proxy.h"
 
 
 typedef enum {
     FILTER_TYPE_CALL = 1 << 0,
     FILTER_TYPE_BROADCAST = 1 << 1,
-    FILTER_TYPE_ALL=FILTER_TYPE_CALL|FILTER_TYPE_BROADCAST,
+    FILTER_TYPE_ALL = FILTER_TYPE_CALL | FILTER_TYPE_BROADCAST,
 } FilterTypeMask;
 
 typedef enum {
     FLATPAK_POLICY_NONE,
     FLATPAK_POLICY_SEE,
     FLATPAK_POLICY_TALK,
-    FLATPAK_POLICY_OWN
+    FLATPAK_POLICY_OWN,
 } FlatpakPolicy;
+
+typedef enum {
+    AUTH_WAITING_FOR_BEGIN,
+    AUTH_WAITING_FOR_BACKLOG,
+    AUTH_COMPLETE,
+} AuthState;
 
 class Filter {
 public:
@@ -39,20 +46,48 @@ private:
     std::string member;
 };
 
-class FlatpakProxyClient{
+class ProxySide{
 
+};
+
+class FlatpakProxyClient {
+public:
+    FlatpakProxyClient(
+            FlatpakProxy *proxy,
+            Glib::RefPtr<Gio::SocketConnection> client_conn
+    );
+
+    ~FlatpakProxyClient();
+
+private:
+    AuthState auth_state;
+    FlatpakProxy *proxy;
+
+    size_t auth_requests;
+    size_t auth_replies;
+    std::vector<uint8_t> auth_buffer;
+    std::unique_ptr<ProxySide> client_side;
+    std::unique_ptr<ProxySide> bus_side;
+
+    uint32_t hello_serial;
+    uint32_t     last_fake_serial;
+    std::unordered_map<uint32_t, GDBusMessage*> rewrite_reply;//todo replace GDBusMessage
+    std::unordered_map<uint32_t, std::string> get_owner_reply;
+
+    std::unordered_map<std::string, int> unique_id_policy;
+    std::unordered_map<std::string, std::vector<std::string>> unique_id_owned_names;
 };
 
 class FlatpakProxy {
 public:
-    FlatpakProxy(std::string dbus_address,std::string socket_path);
+    FlatpakProxy(std::string dbus_address, std::string socket_path);
 
     ~FlatpakProxy();
 
 private:
     bool log_messages;
     Glib::RefPtr<Gio::SocketService> parent;
-    std::list<FlatpakProxyClient*> *clients;
+    std::list<FlatpakProxyClient *> *clients;
     std::string socket_path;
     std::string dbus_address;
     bool filter;
@@ -74,5 +109,13 @@ private:
 
     void add_broadcast_rule(std::string name, bool name_is_subtree, std::string rule);
 
+    bool start();
+
+    void stop();
+
+    bool incoming_connection(
+            const Glib::RefPtr<Gio::SocketConnection> &connection,
+            const Glib::RefPtr<Glib::Object> &source_object
+    );
 };
 
