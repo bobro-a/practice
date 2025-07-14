@@ -7,6 +7,7 @@
 #include <glibmm.h>
 #include <giomm/init.h>
 #include <giomm/socketservice.h>
+#include <gio/gdbusaddress.h>
 #include "flatpak-proxy.h"
 
 class FlatpakProxyClient;
@@ -90,8 +91,9 @@ public:
     GSocketConnection *connection;
 
     void free_side();
-private:
+
     void start_reading();
+private:
 
     void stop_reading();
 
@@ -125,8 +127,15 @@ public:
 
     ~FlatpakProxyClient();
 
+    std::unique_ptr<ProxySide> bus_side;
+    std::unique_ptr<ProxySide> client_side;
 private:
+    void add_unique_id_owned_name();
+    void update_unique_id_policy();
+    void get_max_policy();
+    void get_max_policy_and_matched();
     void init_side();
+    void init();
 
     AuthState auth_state;
     FlatpakProxy *proxy;
@@ -134,8 +143,6 @@ private:
     size_t auth_requests;
     size_t auth_replies;
     std::vector<uint8_t> auth_buffer;
-    std::unique_ptr<ProxySide> client_side;
-    std::unique_ptr<ProxySide> bus_side;
 
     uint32_t hello_serial;
     uint32_t last_fake_serial;
