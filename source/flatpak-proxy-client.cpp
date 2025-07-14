@@ -90,8 +90,7 @@ FlatpakProxy::~FlatpakProxy() {
             ::unlink(socket_path.c_str());
         }
     }
-    assert(clients->empty());
-    delete clients;
+    assert(clients.empty());
     for (auto &[_, v]: filters) {
         for (auto f: v) {
             delete f;
@@ -106,7 +105,42 @@ FlatpakProxy::FlatpakProxy(std::string dbus_address, std::string socket_path) {
     log_messages = filter = sloppy_names = false;
     parent = Gio::SocketService::create();
     add_policy("org.freedesktop.DBus", false, FLATPAK_POLICY_TALK);
-    clients = new std::list<FlatpakProxyClient *>;
+    clients = {};
+}
+
+
+void ProxySide::init_side(FlatpakProxyClient *client, bool is_bus_side){
+    got_first_byte = is_bus_side;
+    this->client = client;
+    header_buffer.size = 16;
+    header_buffer.pos = 0;
+    current_read_buffer = &header_buffer;
+    expected_replies.clear();
+}
+
+
+void ProxySide::free_side(){
+    if (connection) {
+        g_object_unref(connection);
+        connection = nullptr;
+    }
+
+    extra_input_data.clear();
+
+    buffers.clear();
+    control_messages.clear();
+
+    if (in_source) {
+        g_source_destroy(in_source);
+        in_source = nullptr;
+    }
+
+    if (out_source) {
+        g_source_destroy(out_source);
+        out_source = nullptr;
+    }
+
+    expected_replies.clear();
 }
 
 
@@ -153,15 +187,35 @@ Filter::Filter(std::string name, bool name_is_subtree, FilterTypeMask types, std
 FlatpakProxyClient::FlatpakProxyClient(FlatpakProxy* proxy,
         Glib::RefPtr<Gio::SocketConnection> client_conn):
         proxy(proxy),
-        auth_state(AuthState::AUTH_WAITING_FOR_BEGIN),
+        auth_state(AUTH_WAITING_FOR_BEGIN),
         auth_requests(0),
         auth_replies(0),
         hello_serial(0),
-        last_fake_serial(0xFFFFFFFF - 65536){
+        last_fake_serial(0xFFFFFFFF - 65536),
+        client_side(std::make_unique<ProxySide>()),
+        bus_side(std::make_unique<ProxySide>()){
+    client_side->init_side(this,false);
+    client_side->init_side(this,true);
 
+    client_side->connection = G_SOCKET_CONNECTION(g_object_ref(client_conn->gobj()));
+    proxy->clients.push_back(this);
 }
 
 FlatpakProxyClient::~FlatpakProxyClient() {
+    if (proxy) {
+        proxy->clients.remove(this);
+    }
 
+    client_side->free_side();
+    bus_side->free_side();
+
+    // TODO: replace GDBusMessage
+    for (auto &[_, msg]: rewrite_reply) {
+        g_object_unref(msg);
+    }
+    rewrite_reply.clear();
+    get_owner_reply.clear();
+    unique_id_policy.clear();
+    unique_id_owned_names.clear();
 }
 
