@@ -80,7 +80,34 @@ bool FlatpakProxy::incoming_connection(
         const Glib::RefPtr<Glib::Object> &source_object
 ) {
     connection->get_socket()->set_blocking(false);
-    //todo create FlatpakProxyClient
+
+    FlatpakProxyClient* client = new FlatpakProxyClient(this, connection);
+
+    GError* error = nullptr;
+    GIOStream* stream = g_dbus_address_get_stream_sync(
+            dbus_address.c_str(),
+            nullptr,
+            &error
+    );
+
+    if (!stream) {
+        std::cerr << "Connection error to D-Bus: " << (error ? error->message : "unknown") << std::endl;
+        g_clear_error(&error);
+        delete client;
+        return false;
+    }
+
+    GSocketConnection* bus_conn = G_SOCKET_CONNECTION(stream);
+    g_socket_set_blocking(g_socket_connection_get_socket(bus_conn), FALSE);
+
+    client->bus_side->connection = bus_conn; // GSocketConnection*
+    g_object_ref(bus_conn); // если потом будешь хранить
+
+    // запускаем чтение
+    client->client_side->start_reading();
+    client->bus_side->start_reading();
+
+
     return true;
 }
 
@@ -141,6 +168,21 @@ void ProxySide::free_side(){
     }
 
     expected_replies.clear();
+}
+//todo side_in_cb
+void ProxySide::start_reading() {
+    GSocket* socket = g_socket_connection_get_socket(connection);
+    in_source = g_socket_create_source(socket, G_IO_IN, nullptr);
+    g_source_set_callback(in_source, G_SOURCE_FUNC(side_in_cb), this, nullptr);
+    g_source_attach(in_source, nullptr);
+    g_source_unref(in_source);
+}
+
+void ProxySide::stop_reading() {
+    if (in_source) {
+        g_source_destroy(in_source);
+        in_source = nullptr;
+    }
 }
 
 
@@ -209,7 +251,7 @@ FlatpakProxyClient::~FlatpakProxyClient() {
     client_side->free_side();
     bus_side->free_side();
 
-    // TODO: replace GDBusMessage
+    // todo replace GDBusMessage
     for (auto &[_, msg]: rewrite_reply) {
         g_object_unref(msg);
     }
@@ -218,4 +260,22 @@ FlatpakProxyClient::~FlatpakProxyClient() {
     unique_id_policy.clear();
     unique_id_owned_names.clear();
 }
+//todo
+void FlatpakProxyClient::add_unique_id_owned_name(){
 
+}
+void FlatpakProxyClient::update_unique_id_policy(){
+
+}
+void FlatpakProxyClient::get_max_policy(){
+
+}
+void FlatpakProxyClient::get_max_policy_and_matched(){
+
+}
+void FlatpakProxyClient::init_side(){
+
+}
+void FlatpakProxyClient::init(){
+
+}
