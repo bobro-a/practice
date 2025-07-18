@@ -28,7 +28,6 @@ void Buffer::unref() {
     assert(refcount-- > 0);
     if (refcount == 0)
         delete this;
-
 }
 
 bool Buffer::read(ProxySide *side,
