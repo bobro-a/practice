@@ -86,6 +86,8 @@ dbus_proxy = executable(
     'source/filter.cpp',
     'source/proxyside.cpp',
     'headers/flatpak-proxy-client.h',
+    'headers/utils.h',
+    'source/utils.cpp',
   ],
   install : true,
   install_dir : bindir,
