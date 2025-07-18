@@ -1,5 +1,16 @@
 #include "headers/flatpak-proxy-client.h"
 
+static inline uint32_t
+align_by_4(uint32_t offset) {
+    return (offset + 4 - 1) & ~(4 - 1);
+}
+
+static uint32_t read_uint32(Header* header, std::vector<uint8_t>::iterator it) {
+    return header->big_endian
+           ? (it[0] << 24) | (it[1] << 16) | (it[2] << 8) | it[3]
+           : (it[3] << 24) | (it[2] << 16) | (it[1] << 8) | it[0];
+}
+
 Buffer::Buffer(size_t size, Buffer *old) {
     this->size = size;
     refcount = 1;
@@ -146,13 +157,28 @@ bool Buffer::write(ProxySide *side,
 
 std::string Buffer::get_signature(uint32_t &offset, uint32_t end_offset) {
     if (offset >= end_offset) return FALSE;
-    size_t len=data[offset++];
-    if (offset+len+1>end_offset || data[offset+len]!=0) return FALSE;
-    std::string str(data.begin()+offset,data.begin()+offset+len);
-    offset+=len+1;
+    size_t len = data[offset++];
+    if (offset + len + 1 > end_offset || data[offset + len] != 0) return FALSE;
+    std::string str(data.begin() + offset, data.begin() + offset + len);
+    offset += len + 1;
     return str;
 }
 
-std::string Buffer::get_string(Header *header, uint32_t offset, uint32_t end_offset, GError **error){
+std::string Buffer::get_string(Header *header, uint32_t &offset, uint32_t end_offset, GError **error) {
+    offset = align_by_4(offset);
+    if (offset + 4 >= end_offset) {
+        std::cerr << "String header would align past boundary\n";
+        return FALSE;
+    }
+    uint32_t len = read_uint32(header, data.begin() + offset);
+    offset += 4;
 
+    if (offset+len+1>end_offset || offset + len + 1 > data.size()){
+        std::cerr << "String would align past boundary\n";
+        return FALSE;
+    }
+//    if (buffer->data[(*offset) + len] != 0) todo remove all such lines, as this is a condition for the nul terminal.
+    std::string str(data.begin()+offset,data.begin()+offset+len);
+    offset+=len+1;
+    return str;
 }
