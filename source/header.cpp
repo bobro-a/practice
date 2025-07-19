@@ -3,7 +3,19 @@
 
 
 std::string debug_str(std::string s, Header *header) {
-    //todo
+    if (!header->path.empty())
+        s += "\n\tPath: " + header->path;
+    if (!header->interface.empty())
+        s += "\n\tInterface: " + header->interface;
+    if (!header->member.empty())
+        s += "\n\tMember: " + header->member;
+    if (!header->error_name.empty())
+        s += "\n\tError name: " + header->error_name;
+    if (!header->destination.empty())
+        s += "\n\tDestination: " + header->destination;
+    if (!header->sender.empty())
+        s += "\n\tSender: " + header->sender;
+    return s;
 }
 
 std::string get_signature(Buffer *buffer, uint32_t *offset, uint32_t end_offset) {
@@ -32,7 +44,7 @@ std::string get_string(Buffer *buffer, Header *header, uint32_t *offset, uint32_
 
 }
 
-Header::Header(Buffer *buffer) {
+void Header::parse(Buffer *buffer) {
     buffer->ref();
     try {
         if (buffer->size < 16) {
@@ -80,25 +92,25 @@ Header::Header(Buffer *buffer) {
                 case G_DBUS_MESSAGE_HEADER_FIELD_PATH:
                     if (signature_temp != "o")
                         throw std::runtime_error(
-                                "Signature is invalid for path (" + signature + ")" + debug_str(header_str, this));
+                                "Signature is invalid for path (" + signature_temp + ")" + debug_str(header_str, this));
                     path = get_string(buffer, this, &offset, end_offset);
                     break;
                 case G_DBUS_MESSAGE_HEADER_FIELD_INTERFACE:
                     if (signature_temp != "s")
                         throw std::runtime_error(
-                                "Signature is invalid for interface (" + signature + ")" + debug_str(header_str, this));
+                                "Signature is invalid for interface (" + signature_temp + ")" + debug_str(header_str, this));
                     interface = get_string(buffer, this, &offset, end_offset);
                     break;
                 case G_DBUS_MESSAGE_HEADER_FIELD_MEMBER:
                     if (signature_temp != "s")
                         throw std::runtime_error(
-                                "Signature is invalid for member (" + signature + ")" + debug_str(header_str, this));
+                                "Signature is invalid for member (" + signature_temp + ")" + debug_str(header_str, this));
                     member = get_string(buffer, this, &offset, end_offset);
                     break;
                 case G_DBUS_MESSAGE_HEADER_FIELD_ERROR_NAME:
                     if (signature_temp != "s")
                         throw std::runtime_error(
-                                "Signature is invalid for error (" + signature + ")" + debug_str(header_str, this));
+                                "Signature is invalid for error (" + signature_temp + ")" + debug_str(header_str, this));
                     error_name = get_string(buffer, this, &offset, end_offset);
                     break;
                 case G_DBUS_MESSAGE_HEADER_FIELD_REPLY_SERIAL:
@@ -112,20 +124,20 @@ Header::Header(Buffer *buffer) {
                 case G_DBUS_MESSAGE_HEADER_FIELD_DESTINATION:
                     if (signature_temp != "s")
                         throw std::runtime_error(
-                                "Signature is invalid for destination (" + signature + ")" +
+                                "Signature is invalid for destination (" + signature_temp + ")" +
                                 debug_str(header_str, this));
                     destination = get_string(buffer, this, &offset, end_offset);
                     break;
                 case G_DBUS_MESSAGE_HEADER_FIELD_SENDER:
                     if (signature_temp != "s")
                         throw std::runtime_error(
-                                "Signature is invalid for sender (" + signature + ")" + debug_str(header_str, this));
+                                "Signature is invalid for sender (" + signature_temp + ")" + debug_str(header_str, this));
                     sender = get_string(buffer, this, &offset, end_offset);
                     break;
                 case G_DBUS_MESSAGE_HEADER_FIELD_SIGNATURE:
                     if (signature_temp != "g")
                         throw std::runtime_error(
-                                "Signature is invalid for signature (" + signature + ")" + debug_str(header_str, this));
+                                "Signature is invalid for signature (" + signature_temp + ")" + debug_str(header_str, this));
                     signature = get_signature(buffer, &offset, end_offset);
                     if (signature.empty())
                         throw std::runtime_error(
@@ -154,12 +166,12 @@ Header::Header(Buffer *buffer) {
                                 "Method return has no reply serial " + debug_str(header_str, this));
                     break;
                 case G_DBUS_MESSAGE_TYPE_ERROR:
-                    if (erroe_name.empty() || !has_reply_serial)
+                    if (error_name.empty() || !has_reply_serial)
                         throw std::runtime_error(
                                 "Error is missing error name or reply serial " + debug_str(header_str, this));
                     break;
                 case G_DBUS_MESSAGE_TYPE_SIGNAL:
-                    if (path.empty ||
+                    if (path.empty() ||
                         interface.empty() ||
                         member.empty())
                         throw std::runtime_error(
@@ -197,8 +209,69 @@ bool Header::client_message_generates_reply() {
     }
 }
 
-std::string debug_str(std::string s);
 
-void print_outgoing();
+void Header::print_outgoing(){
+    switch(type) {
+        case G_DBUS_MESSAGE_TYPE_METHOD_CALL:
+            //todo debug: check if you can't print the values right away, because they're empty.
+            std::cout << "C" << serial <<
+                      ": -> " << (!destination.empty() ? destination : "(no dest)") <<
+                      " call " << (!interface.empty() ? interface : "") <<
+                      "." << (!member.empty() ? member : "") <<
+                      " at " << (!path.empty() ? path : "") << "\n";
+            break;
+        case G_DBUS_MESSAGE_TYPE_METHOD_RETURN:
+            std::cout << "C" << serial << ": -> " <<
+                      (!destination.empty() ? destination : "(no dest)") <<
+                      " return from B" << reply_serial << "\n";
+            break;
+        case G_DBUS_MESSAGE_TYPE_ERROR:
+            std::cout << "C" << serial << ": -> " <<
+            (!destination.empty() ? destination : "(no dest)") <<
+            " return error "<<(!error_name.empty()?error_name:"(no error)")<<
+            " from B"<<reply_serial<<"\n";
+            break;
+        case G_DBUS_MESSAGE_TYPE_SIGNAL:
+            std::cout << "C" << serial <<
+                      ": -> " << (!destination.empty() ? destination : "all") <<
+                      " signal " << (!interface.empty() ? interface : "") <<
+                      "." << (!member.empty() ? member : "") <<
+                      " at " << (!path.empty() ? path : "") << "\n";
+            break;
+        default:
+            std::cout<<"unknown message type\n";
+    }
+}
 
-void print_incoming();
+void Header::print_incoming(){
+    switch (type){
+        case G_DBUS_MESSAGE_TYPE_METHOD_CALL:
+            std::cout<<"B"<<serial<<
+            ": <- "<<(!sender.empty()?sender:"(no sender)")<<
+            " call "<<(!interface.empty() ? interface : "")<<
+            "."<<(!member.empty() ? member : "")<<
+            " at "<<(!path.empty() ? path : "")<<"\n";
+            break;
+
+        case G_DBUS_MESSAGE_TYPE_METHOD_RETURN:
+            std::cout<<"B"<<serial<<
+            ": <- "<<(!sender.empty()?sender:"(no sender)")<<
+            " return from C"<<reply_serial<<"\n";
+            break;
+        case G_DBUS_MESSAGE_TYPE_ERROR:
+            std::cout<<"B"<<serial<<
+            ": <- "<<(!sender.empty()?sender:"(no sender)")<<
+            " return error "<<(!error_name.empty()?error_name:"(no error)")<<
+            " from C"<<reply_serial<<"\n";
+            break;
+        case G_DBUS_MESSAGE_TYPE_SIGNAL:
+            std::cout<<"B"<<serial<<
+            ": <- "<<(!sender.empty()?sender:"(no sender)")<<
+            " signal "<<(!interface.empty()?interface:"")<<
+            "."<<(!member.empty()?member:"")<<
+            " at "<<(!path.empty()?path:"")<<"\n";
+            break;
+        default:
+            std::cout<<"unknown message type\n";
+    }
+}
