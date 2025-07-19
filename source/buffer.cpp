@@ -4,6 +4,7 @@
 Buffer::Buffer(size_t size, Buffer *old) {
     this->size = size;
     refcount = 1;
+    pos=0;
     if (old) {
         pos = old->pos;
         sent = old->sent;
