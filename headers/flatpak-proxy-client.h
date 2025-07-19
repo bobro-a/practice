@@ -1,16 +1,26 @@
 #pragma once
 
+#include <cassert>
+#include <filesystem>
+#include <iostream>
 #include <unordered_map>
 #include <string>
 #include <vector>
 #include <list>
+#include "flatpak-proxy.h"
+#include <assert.h>
+
 #include <glibmm.h>
 #include <giomm/init.h>
 #include <giomm/socketservice.h>
 #include <gio/gdbusaddress.h>
-#include "flatpak-proxy.h"
+#include <gio/gsocket.h>
+#include <gio/gsocketcontrolmessage.h>
+
 
 class FlatpakProxyClient;
+class ProxySide;
+class Header;
 
 typedef enum {
     FILTER_TYPE_CALL = 1 << 0,
@@ -35,6 +45,8 @@ typedef enum {
     AUTH_COMPLETE,
 } AuthState;
 
+#define MAX_CLIENT_SERIAL (G_MAXUINT32 - 65536)
+
 class Filter {
 public:
     Filter(std::string name, bool name_is_subtree, FlatpakPolicy policy);
@@ -54,31 +66,49 @@ private:
 
 class Buffer {
 public:
+    Buffer(size_t size, Buffer* old);
+    ~Buffer();
+    void ref();
+    bool read(ProxySide *side,
+              GSocket   *socket);
+
+    void unref();
     size_t size;
     size_t pos;
+    bool send_credentials;
+    std::vector<uint8_t> data;
 
 private:
+
+    bool write(ProxySide *side,
+               GSocket   *socket);
+
     size_t sent;
     int refcount;
-    bool send_credentials;
-    GList *control_messages;
-
-    uint8_t data[16];
+    std::list<GSocketControlMessage*> control_messages;
 };
 
 class Header {
-    Buffer *buffer;
+public:
+    ~Header();
     bool big_endian;
-    uint8_t type;
-    uint8_t flags;
-    uint32_t length;
-    uint32_t serial;
     std::string path;
     std::string interface;
     std::string member;
     std::string error_name;
     std::string destination;
     std::string sender;
+private:
+    void parse(Buffer *buffer); //parse_header
+    bool client_message_generates_reply();
+//    void parse_header (Buffer *buffer, GError **error);
+    void print_outgoing();
+    void print_incoming();
+    Buffer *buffer;
+    uint8_t type;
+    uint8_t flags;
+    uint32_t length;
+    uint32_t serial;
     std::string signature;
     bool has_reply_serial;
     uint32_t reply_serial;
@@ -87,30 +117,26 @@ class Header {
 
 class ProxySide {
 public:
-    void init_side(FlatpakProxyClient *client, bool is_bus_side);
-    GSocketConnection *connection;
-
-    void free_side();
-
+    ProxySide(FlatpakProxyClient *client, bool is_bus_side);//init_side
+    ~ProxySide();//free_side
     void start_reading();
+    void side_closed();
+
+    GSocketConnection *connection;
+    Buffer *current_read_buffer;
+    Buffer header_buffer;
+    FlatpakProxyClient *client;
+    bool closed;
+    bool got_first_byte;
+    std::vector<uint8_t> extra_input_data;
+
 private:
 
     void stop_reading();
+    ProxySide* get_other_side();
 
-    void side_closed();
-
-    void get_other_side();
-
-    bool got_first_byte;
-    bool closed;
-
-    FlatpakProxyClient *client;
     GSource *in_source;
     GSource *out_source;
-
-    std::vector<uint8_t> extra_input_data;
-    Buffer *current_read_buffer;
-    Buffer header_buffer;
 
     std::list<std::unique_ptr<Buffer>> buffers;
     std::list<std::shared_ptr<void>> control_messages;
@@ -127,22 +153,25 @@ public:
 
     ~FlatpakProxyClient();
 
-    std::unique_ptr<ProxySide> bus_side;
-    std::unique_ptr<ProxySide> client_side;
-private:
-    void add_unique_id_owned_name();
-    void update_unique_id_policy();
-    void get_max_policy();
-    void get_max_policy_and_matched();
-    void init_side();
-    void init();
-
+    ProxySide* bus_side;
+    ProxySide* client_side;
     AuthState auth_state;
+    size_t auth_requests;
+    std::vector<uint8_t> auth_buffer;
+private:
+    void add_unique_id_owned_name(std::string unique_id, std::string owned_name);
+
+    void update_unique_id_policy(std::string unique_id,
+                                 FlatpakPolicy policy);
+
+    FlatpakPolicy get_max_policy(std::string source);
+
+    FlatpakPolicy get_max_policy_and_matched(std::string source,
+                                             std::vector<Filter *> *matched_filters);
+
     FlatpakProxy *proxy;
 
-    size_t auth_requests;
     size_t auth_replies;
-    std::vector<uint8_t> auth_buffer;
 
     uint32_t hello_serial;
     uint32_t last_fake_serial;
@@ -160,6 +189,7 @@ public:
     ~FlatpakProxy();
 
     std::list<FlatpakProxyClient *> clients;
+    std::unordered_map<std::string, std::vector<Filter *>> filters;
 
 private:
     void set_filter(bool filter);
@@ -191,8 +221,5 @@ private:
     std::string dbus_address;
     bool filter;
     bool sloppy_names;
-
-    std::unordered_map<std::string, std::vector<Filter *>> filters;
-
 };
 

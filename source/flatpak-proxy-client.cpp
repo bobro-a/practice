@@ -1,7 +1,5 @@
 #include "headers/flatpak-proxy-client.h"
-#include <cassert>
-#include <filesystem>
-#include <iostream>
+
 
 void FlatpakProxy::set_filter(bool filter) {
     this->filter = filter;
@@ -75,39 +73,39 @@ void FlatpakProxy::stop() {
     parent->stop();
 }
 
+void client_connected_to_dbus(GObject *source_object,
+                              GAsyncResult *res,
+                              void *user_data) {
+    FlatpakProxyClient *client = static_cast<FlatpakProxyClient *>(user_data);
+    GError *error = nullptr;
+
+    GIOStream* stream = g_dbus_address_get_stream_finish(res, NULL, &error);
+    if (!stream) {
+        std::cerr << "Failed to connect to bus: " << error->message<<"\n";
+        if (error) g_error_free(error);
+        delete client;
+        return;
+    }
+
+    GSocketConnection *connection = G_SOCKET_CONNECTION (stream);
+    g_socket_set_blocking(g_socket_connection_get_socket(connection), FALSE);
+    client->bus_side->connection = connection;
+
+    client->client_side->start_reading();
+    client->bus_side->start_reading();
+}
+
 bool FlatpakProxy::incoming_connection(
         const Glib::RefPtr<Gio::SocketConnection> &connection,
         const Glib::RefPtr<Glib::Object> &source_object
 ) {
+    auto client = new FlatpakProxyClient(this, connection);
     connection->get_socket()->set_blocking(false);
 
-    FlatpakProxyClient* client = new FlatpakProxyClient(this, connection);
-
-    GError* error = nullptr;
-    GIOStream* stream = g_dbus_address_get_stream_sync(
-            dbus_address.c_str(),
-            nullptr,
-            &error
-    );
-
-    if (!stream) {
-        std::cerr << "Connection error to D-Bus: " << (error ? error->message : "unknown") << std::endl;
-        g_clear_error(&error);
-        delete client;
-        return false;
-    }
-
-    GSocketConnection* bus_conn = G_SOCKET_CONNECTION(stream);
-    g_socket_set_blocking(g_socket_connection_get_socket(bus_conn), FALSE);
-
-    client->bus_side->connection = bus_conn; // GSocketConnection*
-    g_object_ref(bus_conn); // если потом будешь хранить
-
-    // запускаем чтение
-    client->client_side->start_reading();
-    client->bus_side->start_reading();
-
-
+    g_dbus_address_get_stream(dbus_address.c_str(),
+                              nullptr,
+                              client_connected_to_dbus,
+                              client);
     return true;
 }
 
@@ -135,112 +133,20 @@ FlatpakProxy::FlatpakProxy(std::string dbus_address, std::string socket_path) {
     clients = {};
 }
 
-
-void ProxySide::init_side(FlatpakProxyClient *client, bool is_bus_side){
-    got_first_byte = is_bus_side;
-    this->client = client;
-    header_buffer.size = 16;
-    header_buffer.pos = 0;
-    current_read_buffer = &header_buffer;
-    expected_replies.clear();
-}
-
-
-void ProxySide::free_side(){
-    if (connection) {
-        g_object_unref(connection);
-        connection = nullptr;
-    }
-
-    extra_input_data.clear();
-
-    buffers.clear();
-    control_messages.clear();
-
-    if (in_source) {
-        g_source_destroy(in_source);
-        in_source = nullptr;
-    }
-
-    if (out_source) {
-        g_source_destroy(out_source);
-        out_source = nullptr;
-    }
-
-    expected_replies.clear();
-}
-//todo side_in_cb
-void ProxySide::start_reading() {
-    GSocket* socket = g_socket_connection_get_socket(connection);
-    in_source = g_socket_create_source(socket, G_IO_IN, nullptr);
-    g_source_set_callback(in_source, G_SOURCE_FUNC(side_in_cb), this, nullptr);
-    g_source_attach(in_source, nullptr);
-    g_source_unref(in_source);
-}
-
-void ProxySide::stop_reading() {
-    if (in_source) {
-        g_source_destroy(in_source);
-        in_source = nullptr;
-    }
-}
-
-
-Filter::Filter(std::string name, bool name_is_subtree, FlatpakPolicy policy) {
-    this->name = name;
-    this->name_is_subtree = name_is_subtree;
-    this->policy = policy;
-    this->types = FILTER_TYPE_ALL;
-}
-
-Filter::Filter(std::string name, bool name_is_subtree, FilterTypeMask types, std::string rule) {
-    this->name = name;
-    this->name_is_subtree = name_is_subtree;
-    this->policy = FLATPAK_POLICY_TALK;
-    this->types = types;
-    size_t pos = 0;
-    pos = rule.find('@');
-    if (pos != std::string::npos && pos + 1 < rule.size()) {
-        this->path = rule.substr(pos + 1);
-        if (this->path.ends_with("/*")) {
-            this->path_is_subtree = true;
-            this->path[this->path.size() - 2] = 0;
-        }
-    }
-    size_t method_end = (pos == std::string::npos ? pos : rule.size());
-    if (method_end) {
-        if (rule[0] == '*') {
-
-        } else {
-            this->interface = rule.substr(0, method_end);
-            size_t dot = this->interface.rfind('.');
-            if (dot != std::string::npos) {
-                std::string member = this->interface.substr(dot + 1);
-                if (member != "*") {
-                    this->member = member;
-                }
-                this->interface.resize(dot);
-            }
-        }
-    }
-}
-
-
-FlatpakProxyClient::FlatpakProxyClient(FlatpakProxy* proxy,
-        Glib::RefPtr<Gio::SocketConnection> client_conn):
+FlatpakProxyClient::FlatpakProxyClient(FlatpakProxy *proxy,
+                                       Glib::RefPtr<Gio::SocketConnection> client_conn) :
         proxy(proxy),
         auth_state(AUTH_WAITING_FOR_BEGIN),
         auth_requests(0),
         auth_replies(0),
         hello_serial(0),
         last_fake_serial(0xFFFFFFFF - 65536),
-        client_side(std::make_unique<ProxySide>()),
-        bus_side(std::make_unique<ProxySide>()){
-    client_side->init_side(this,false);
-    client_side->init_side(this,true);
+        client_side(new ProxySide(this, false)),
+        bus_side(new ProxySide(this, true)) {
 
     client_side->connection = G_SOCKET_CONNECTION(g_object_ref(client_conn->gobj()));
     proxy->clients.push_back(this);
+    last_fake_serial = MAX_CLIENT_SERIAL;
 }
 
 FlatpakProxyClient::~FlatpakProxyClient() {
@@ -248,8 +154,8 @@ FlatpakProxyClient::~FlatpakProxyClient() {
         proxy->clients.remove(this);
     }
 
-    client_side->free_side();
-    bus_side->free_side();
+    delete client_side;
+    delete bus_side;
 
     // todo replace GDBusMessage
     for (auto &[_, msg]: rewrite_reply) {
@@ -260,22 +166,71 @@ FlatpakProxyClient::~FlatpakProxyClient() {
     unique_id_policy.clear();
     unique_id_owned_names.clear();
 }
-//todo
-void FlatpakProxyClient::add_unique_id_owned_name(){
 
+void FlatpakProxyClient::add_unique_id_owned_name(std::string unique_id, std::string owned_name) {
+    bool already_added;
+    already_added = (unique_id_owned_names.find(unique_id) != unique_id_owned_names.end());
+    if (!already_added) {
+        unique_id_owned_names[unique_id].push_back(owned_name);
+    }
 }
-void FlatpakProxyClient::update_unique_id_policy(){
 
+void FlatpakProxyClient::update_unique_id_policy(std::string unique_id,
+                                                 FlatpakPolicy policy) {
+    if (policy > FLATPAK_POLICY_NONE && policy > unique_id_policy[unique_id])
+        unique_id_policy[unique_id] = policy;
 }
-void FlatpakProxyClient::get_max_policy(){
 
+FlatpakPolicy FlatpakProxyClient::get_max_policy(std::string source) {
+    return get_max_policy_and_matched(source, nullptr);
 }
-void FlatpakProxyClient::get_max_policy_and_matched(){
 
-}
-void FlatpakProxyClient::init_side(){
+FlatpakPolicy FlatpakProxyClient::get_max_policy_and_matched(std::string source,
+                                                             std::vector<Filter *> *matched_filters) {
+    static Filter *match_all[FLATPAK_POLICY_OWN + 1] = {
+            nullptr,
+            new Filter("", false, FLATPAK_POLICY_SEE),
+            new Filter("", false, FLATPAK_POLICY_TALK),
+            new Filter("", false, FLATPAK_POLICY_OWN)
+    };
+    if (source.empty()) {
+        if (matched_filters) matched_filters->push_back(match_all[FLATPAK_POLICY_TALK]);
+        return FLATPAK_POLICY_TALK;
+    }
+    FlatpakPolicy max_policy = FLATPAK_POLICY_NONE;
 
-}
-void FlatpakProxyClient::init(){
+    if (source[0] == ':') {
+        auto it = unique_id_policy.find(source);
+        if (it != unique_id_policy.end())
+            max_policy = static_cast<FlatpakPolicy>(it->second);
+        if (matched_filters && max_policy > FLATPAK_POLICY_NONE)
+            matched_filters->push_back(match_all[max_policy]);
 
+        auto owned = unique_id_owned_names.find(source);
+        if (owned != unique_id_owned_names.end()) {
+            for (const std::string &name: owned->second)
+                max_policy = std::max(max_policy, get_max_policy_and_matched(name, matched_filters));
+        }
+        return max_policy;
+    }
+    std::string name = source;
+    bool exact_match = true;
+    while (true) {
+        auto it = proxy->filters.find(name);
+        if (it != proxy->filters.end()) {
+            for (auto *filter: it->second) {
+                if (exact_match || filter->name_is_subtree) {
+                    max_policy = std::max(max_policy, filter->policy);
+                    if (matched_filters) matched_filters->push_back(filter);
+                }
+            }
+        }
+        exact_match = false;
+        size_t dot = name.rfind('.');
+        if (dot == std::string::npos) break;
+        name.erase(dot);
+    }
+
+    return max_policy;
 }
+
