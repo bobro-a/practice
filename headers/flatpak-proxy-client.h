@@ -155,9 +155,11 @@ public:
 
     ProxySide* bus_side;
     ProxySide* client_side;
+    FlatpakProxy *proxy;
     AuthState auth_state;
     size_t auth_requests;
     std::vector<uint8_t> auth_buffer;
+    size_t auth_replies;
 private:
     void add_unique_id_owned_name(std::string unique_id, std::string owned_name);
 
@@ -168,11 +170,6 @@ private:
 
     FlatpakPolicy get_max_policy_and_matched(std::string source,
                                              std::vector<Filter *> *matched_filters);
-
-    FlatpakProxy *proxy;
-
-    size_t auth_replies;
-
     uint32_t hello_serial;
     uint32_t last_fake_serial;
     std::unordered_map<uint32_t, GDBusMessage *> rewrite_reply;//todo replace GDBusMessage
@@ -185,12 +182,10 @@ private:
 class FlatpakProxy {
 public:
     FlatpakProxy(std::string dbus_address, std::string socket_path);
-
     ~FlatpakProxy();
-
     std::list<FlatpakProxyClient *> clients;
     std::unordered_map<std::string, std::vector<Filter *>> filters;
-
+    bool log_messages;
 private:
     void set_filter(bool filter);
 
@@ -214,8 +209,6 @@ private:
             const Glib::RefPtr<Gio::SocketConnection> &connection,
             const Glib::RefPtr<Glib::Object> &source_object
     );
-
-    bool log_messages;
     Glib::RefPtr<Gio::SocketService> parent;
     std::string socket_path;
     std::string dbus_address;
