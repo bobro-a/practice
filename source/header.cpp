@@ -271,3 +271,24 @@ void Header::print_incoming() {
             std::cout << "unknown message type\n";
     }
 }
+
+bool Header::is_introspection_call() {
+    return type == G_DBUS_MESSAGE_TYPE_METHOD_CALL &&
+           interface == "org.freedesktop.DBus.Introspectable";
+}
+
+bool Header::is_dbus_method_call() {
+    return is_for_bus() &&
+           type == G_DBUS_MESSAGE_TYPE_METHOD_CALL &&
+           interface == "org.freedesktop.DBus";
+}
+
+bool Header::is_for_bus() {
+    return destination == "org.freedesktop.DBus";
+}
+
+bool Header::is_dbus_method_call() {
+    return is_for_bus() &&
+           type == G_DBUS_MESSAGE_TYPE_METHOD_CALL &&
+           interface == "org.freedesktop.DBus";
+}
