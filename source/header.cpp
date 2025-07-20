@@ -286,9 +286,3 @@ bool Header::is_dbus_method_call() {
 bool Header::is_for_bus() {
     return destination == "org.freedesktop.DBus";
 }
-
-bool Header::is_dbus_method_call() {
-    return is_for_bus() &&
-           type == G_DBUS_MESSAGE_TYPE_METHOD_CALL &&
-           interface == "org.freedesktop.DBus";
-}

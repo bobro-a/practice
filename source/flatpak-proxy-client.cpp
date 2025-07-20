@@ -79,9 +79,9 @@ void client_connected_to_dbus(GObject *source_object,
     FlatpakProxyClient *client = static_cast<FlatpakProxyClient *>(user_data);
     GError *error = nullptr;
 
-    GIOStream* stream = g_dbus_address_get_stream_finish(res, NULL, &error);
+    GIOStream *stream = g_dbus_address_get_stream_finish(res, NULL, &error);
     if (!stream) {
-        std::cerr << "Failed to connect to bus: " << error->message<<"\n";
+        std::cerr << "Failed to connect to bus: " << error->message << "\n";
         if (error) g_error_free(error);
         delete client;
         return;
@@ -164,12 +164,12 @@ FlatpakProxyClient::~FlatpakProxyClient() {
     unique_id_owned_names.clear();
 }
 
-std::list<GSocketControlMessage*>
-side_get_n_unix_fds (ProxySide *side, int n_fds){
-    while (!side->control_messages.empty()){
+std::list<GSocketControlMessage *>
+side_get_n_unix_fds(ProxySide *side, int n_fds) {
+    while (!side->control_messages.empty()) {
         auto it = side->control_messages.begin();
         GSocketControlMessage *msg = *it;
-        if (G_IS_UNIX_FD_MESSAGE (msg)){
+        if (G_IS_UNIX_FD_MESSAGE (msg)) {
             GUnixFDMessage *fd_msg = G_UNIX_FD_MESSAGE(msg);
             GUnixFDList *fd_list = g_unix_fd_message_get_fd_list(fd_msg);
             int len = g_unix_fd_list_get_length(fd_list);
@@ -187,16 +187,13 @@ side_get_n_unix_fds (ProxySide *side, int n_fds){
 }
 
 bool
-update_socket_messages (ProxySide *side, Buffer *buffer, Header *header)
-{
+update_socket_messages(ProxySide *side, Buffer *buffer, Header *header) {
     side->control_messages.splice(side->control_messages.end(), buffer->control_messages);
     buffer->control_messages.clear();
-    if (header->unix_fds > 0)
-    {
-        buffer->control_messages = side_get_n_unix_fds (side, header->unix_fds);
-        if (buffer->control_messages.empty())
-        {
-            std::cerr<<"Not enough fds for message\n";
+    if (header->unix_fds > 0) {
+        buffer->control_messages = side_get_n_unix_fds(side, header->unix_fds);
+        if (buffer->control_messages.empty()) {
+            std::cerr << "Not enough fds for message\n";
             side->side_closed();
             buffer->unref();
             return false;
@@ -205,27 +202,161 @@ update_socket_messages (ProxySide *side, Buffer *buffer, Header *header)
     return true;
 }
 
-void FlatpakProxyClient::got_buffer_from_client(Buffer* buffer){
+ExpectedReplyType
+steal_expected_reply(ProxySide *side, uint32_t serial) {
+    auto it = side->expected_replies.find(serial);
+    if (it != side->expected_replies.end()) {
+        ExpectedReplyType type = it->second;
+        side->expected_replies.erase(it);
+        return type;
+    }
+    return EXPECTED_REPLY_NONE;
+}
+
+bool filter_matches(Filter *filter,//todo: later make Filter methods
+                    FilterTypeMask type,
+                    std::string &path,
+                    std::string &interface,
+                    std::string &member) {
+    if (filter->policy < FLATPAK_POLICY_TALK ||
+        (filter->types & type) == 0)
+        return false;
+    if (!filter->path.empty()) {
+        if (path.empty()) return false;
+        if (filter->path_is_subtree) {
+            if (!path.starts_with(filter->path) ||
+                (path.size() != filter->path.size() && path[filter->path.size()] != '/'))
+                return false;
+
+        } else if (filter->path != path) return false;
+    }
+    if (!filter->interface.empty() && filter->interface != interface)
+        return false;
+    if (!filter->member.empty() && filter->member != member)
+        return false;
+    return true;
+}
+
+bool any_filter_matches(std::list<Filter *> *filters,
+                        FilterTypeMask type,
+                        std::string &path,
+                        std::string &interface,
+                        std::string &member) {
+    for (auto filter: *filters) {
+        if (filter_matches(filter, type, path, interface, member))
+            return true;
+    }
+
+    return false;
+}
+
+BusHandler
+get_dbus_method_handler(FlatpakProxyClient *client, Header *header) {
+    if (header->has_reply_serial) {
+        ExpectedReplyType expected_reply =
+                steal_expected_reply(&client->bus_side,
+                                     header->reply_serial);
+        if (expected_reply == EXPECTED_REPLY_NONE)
+            return HANDLE_DENY;
+
+        return HANDLE_PASS;
+    }
+    std::list<Filter *> filters;
+    FlatpakPolicy policy = client->get_max_policy_and_matched(header->destination, &filters);
+    if (policy < FLATPAK_POLICY_SEE) return HANDLE_HIDE;
+    if (policy < FLATPAK_POLICY_TALK) return HANDLE_DENY;
+    if (!header->is_for_bus()) {
+        if (policy == FLATPAK_POLICY_OWN ||
+            any_filter_matches(&filters, FILTER_TYPE_CALL,
+                               header->path,
+                               header->interface,
+                               header->member))
+            return HANDLE_PASS;
+
+        return HANDLE_DENY;
+    }
+    if (header->is_introspection_call()) return HANDLE_PASS;
+    else if (header->is_dbus_method_call()) {
+        std::string method = header->member;
+        if (method.empty()) return HANDLE_DENY;
+        if (method == "AddMatch") return HANDLE_VALIDATE_MATCH;
+
+        if (method == "Hello" ||
+            method == "RemoveMatch" ||
+            method == "GetId")
+            return HANDLE_PASS;
+
+        if (method == "UpdateActivationEnvironment" ||
+            method == "BecomeMonitor")
+            return HANDLE_DENY;
+
+        if (method == "RequestName" ||
+            method == "ReleaseName" ||
+            method == "ListQueuedOwners")
+            return HANDLE_VALIDATE_OWN;
+
+        if (method == "NameHasOwner") return HANDLE_FILTER_HAS_OWNER_REPLY;
+        if (method == "GetNameOwner") return HANDLE_FILTER_GET_OWNER_REPLY;
+
+        if (method == "GetConnectionUnixProcessID" ||
+            method == "GetConnectionCredentials" ||
+            method == "GetAdtAuditSessionData" ||
+            method == "GetConnectionSELinuxSecurityContext" ||
+            method == "GetConnectionUnixUser")
+            return HANDLE_VALIDATE_SEE;
+
+        if (method == "StartServiceByName") return HANDLE_VALIDATE_TALK;
+
+        if (method == "ListNames" ||
+            method == "ListActivatableNames")
+            return HANDLE_FILTER_NAME_LIST_REPLY;
+
+        std::cerr<<"Unknown bus method "<<method<<"\n";
+    }
+    return HANDLE_DENY;
+}
+
+void FlatpakProxyClient::got_buffer_from_client(Buffer *buffer) {
     ExpectedReplyType expecting_reply = EXPECTED_REPLY_NONE;
-    auto side=this->client_side;
-    if (auth_state == AUTH_COMPLETE && proxy->filter){
+    auto side = this->client_side;
+    if (auth_state == AUTH_COMPLETE && proxy->filter) {
         Header header;
+        BusHandler handler;
         try {
             header.parse(buffer);
-        }catch(std::exception &ex){
-            std::cerr<<"Invalid message header format from client: "<<ex.what()<<"\n";
+        } catch (std::exception &ex) {
+            std::cerr << "Invalid message header format from client: " << ex.what() << "\n";
             side.side_closed();
             buffer->unref();
             return;
         }
-        if (!update_socket_messages (&side, buffer, &header))
+        if (!update_socket_messages(&side, buffer, &header))
             return;
-        //todo
+        if (header.serial > MAX_CLIENT_SERIAL) {
+            std::cerr << "Invalid client serial: Exceeds maximum value of " << MAX_CLIENT_SERIAL << "\n";
+            side.side_closed();
+            buffer->unref();
+            return;
+        }
+        if (proxy->log_messages)
+            header.print_outgoing();
+        if (header.is_dbus_method_call() &&
+            header.member == "Hello") {
+            expecting_reply = EXPECTED_REPLY_HELLO;
+            hello_serial = header.serial;
+        }
+        handler = get_dbus_method_handler(this, &header);
+        switch (handler){
+            case HANDLE_FILTER_HAS_OWNER_REPLY:
+            case HANDLE_FILTER_GET_OWNER_REPLY:
+//todo
+        }
+
     }
 }
 
-void FlatpakProxyClient::got_buffer_from_bus(Buffer* buffer){
-
+void FlatpakProxyClient::got_buffer_from_bus(Buffer *buffer) {
+    //todo
 }
 
 void FlatpakProxyClient::add_unique_id_owned_name(std::string unique_id, std::string owned_name) {
@@ -294,4 +425,3 @@ FlatpakPolicy FlatpakProxyClient::get_max_policy_and_matched(std::string source,
 
     return max_policy;
 }
-

@@ -69,12 +69,12 @@ public:
     std::string name;
     bool name_is_subtree;
     FlatpakPolicy policy;
-private:
-    FilterTypeMask types;
     std::string path;
+    FilterTypeMask types;
     bool path_is_subtree;
     std::string interface;
     std::string member;
+    //todo: add ordinary methods to class, to make the fields private
 };
 
 class Buffer {
@@ -105,6 +105,10 @@ class Header {
 public:
     ~Header();
     void parse(Buffer *buffer); //parse_header
+    void print_outgoing();
+    bool is_introspection_call();
+    bool is_dbus_method_call();
+    bool is_for_bus();
     bool big_endian;
     std::string path;
     std::string interface;
@@ -113,19 +117,19 @@ public:
     std::string destination;
     std::string sender;
     uint32_t unix_fds;
+    uint32_t serial;
+    uint8_t type;
+    bool has_reply_serial;
+    uint32_t reply_serial;
 private:
     bool client_message_generates_reply();
 //    void parse_header (Buffer *buffer, GError **error);
-    void print_outgoing();
     void print_incoming();
+
     Buffer *buffer;
-    uint8_t type;
     uint8_t flags;
     uint32_t length;
-    uint32_t serial;
     std::string signature;
-    bool has_reply_serial;
-    uint32_t reply_serial;
 };
 
 class ProxySide {
@@ -144,6 +148,7 @@ public:
     bool got_first_byte;
     std::vector<uint8_t> extra_input_data;
     std::list<GSocketControlMessage*> control_messages;
+    std::unordered_map<uint32_t, ExpectedReplyType> expected_replies;
 private:
     void stop_reading();
     ProxySide* get_other_side();
@@ -152,8 +157,6 @@ private:
     GSource *out_source;
 
     std::list<std::unique_ptr<Buffer>> buffers;//todo: change, causes an error
-
-    std::unordered_map<uint32_t, ExpectedReplyType> expected_replies;
 };
 
 class FlatpakProxyClient {
@@ -166,6 +169,8 @@ public:
 
     void got_buffer_from_client(Buffer* buffer);
     void got_buffer_from_bus(Buffer* buffer);
+    FlatpakPolicy get_max_policy_and_matched(std::string source,
+                                             std::vector<Filter *> *matched_filters);
 
     ProxySide bus_side;
     ProxySide client_side;
@@ -181,8 +186,6 @@ private:
                                  FlatpakPolicy policy);
 
     FlatpakPolicy get_max_policy(std::string source);
-    FlatpakPolicy get_max_policy_and_matched(std::string source,
-                                             std::vector<Filter *> *matched_filters);
     uint32_t hello_serial;
     uint32_t last_fake_serial;
     std::unordered_map<uint32_t, GDBusMessage *> rewrite_reply;//todo replace GDBusMessage
