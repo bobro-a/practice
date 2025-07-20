@@ -121,6 +121,7 @@ public:
     ~ProxySide();//free_side
     void start_reading();
     void side_closed();
+    void got_buffer_from_side(Buffer* buffer);
 
     GSocketConnection *connection;
     Buffer *current_read_buffer;
@@ -153,8 +154,8 @@ public:
 
     ~FlatpakProxyClient();
 
-    ProxySide* bus_side;
-    ProxySide* client_side;
+    ProxySide bus_side;
+    ProxySide client_side;
     FlatpakProxy *proxy;
     AuthState auth_state;
     size_t auth_requests;

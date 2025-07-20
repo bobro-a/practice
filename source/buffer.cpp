@@ -36,7 +36,7 @@ bool Buffer::read(ProxySide *side,
                   GSocket *socket) {
     FlatpakProxyClient *client = side->client;
     size_t received = 0;
-    if (client->auth_state == AUTH_WAITING_FOR_BACKLOG && side == client->client_side)
+    if (client->auth_state == AUTH_WAITING_FOR_BACKLOG && side == &client->client_side)
         return false;
     if (!side->extra_input_data.empty() && client->auth_state == AUTH_COMPLETE) {
         assert(size >= pos);

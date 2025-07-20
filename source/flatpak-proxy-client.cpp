@@ -89,10 +89,10 @@ void client_connected_to_dbus(GObject *source_object,
 
     GSocketConnection *connection = G_SOCKET_CONNECTION (stream);
     g_socket_set_blocking(g_socket_connection_get_socket(connection), FALSE);
-    client->bus_side->connection = connection;
+    client->bus_side.connection = connection;
 
-    client->client_side->start_reading();
-    client->bus_side->start_reading();
+    client->client_side.start_reading();
+    client->bus_side.start_reading();
 }
 
 bool FlatpakProxy::incoming_connection(
@@ -141,10 +141,10 @@ FlatpakProxyClient::FlatpakProxyClient(FlatpakProxy *proxy,
         auth_replies(0),
         hello_serial(0),
         last_fake_serial(0xFFFFFFFF - 65536),
-        client_side(new ProxySide(this, false)),
-        bus_side(new ProxySide(this, true)) {
+        client_side(ProxySide(this, false)),
+        bus_side(ProxySide(this, true)) {
 
-    client_side->connection = G_SOCKET_CONNECTION(g_object_ref(client_conn->gobj()));
+    client_side.connection = G_SOCKET_CONNECTION(g_object_ref(client_conn->gobj()));
     proxy->clients.push_back(this);
     last_fake_serial = MAX_CLIENT_SERIAL;
 }
@@ -153,9 +153,6 @@ FlatpakProxyClient::~FlatpakProxyClient() {
     if (proxy) {
         proxy->clients.remove(this);
     }
-
-    delete client_side;
-    delete bus_side;
 
     // todo replace GDBusMessage
     for (auto &[_, msg]: rewrite_reply) {

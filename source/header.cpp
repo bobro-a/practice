@@ -1,5 +1,5 @@
 #include "headers/flatpak-proxy-client.h"
-#include "headers/utils.h."
+#include "headers/utils.h"
 
 
 std::string debug_str(std::string s, Header *header) {

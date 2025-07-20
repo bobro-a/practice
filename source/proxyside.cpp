@@ -40,6 +40,17 @@ ProxySide::~ProxySide() {
     expected_replies.clear();
 }
 
+//todo
+void side_closed();
+void got_buffer_from_side(Buffer* buffer);
+
+ProxySide* ProxySide::get_other_side(){
+    FlatpakProxyClient *client = this->client;
+    if (this==&client->client_side)
+        return &client->bus_side;
+    return &client->client_side;
+}
+
 bool auth_line_is_begin(std::string line) {
     std::string auth_beg = "BEGIN";
     if (!line.starts_with(auth_beg)) return false;
@@ -122,7 +133,7 @@ bool side_in_cb(GSocket *socket, GIOCondition condition, void *user_data) {
             buffer->size = buffer->pos;
             if (!side->got_first_byte)
                 buffer->send_credentials = side->got_first_byte = true;
-            else if (side == client->client_side && client->auth_state == AUTH_WAITING_FOR_BEGIN) {
+            else if (side == &client->client_side && client->auth_state == AUTH_WAITING_FOR_BEGIN) {
                 size_t lines_skipped = 0;
                 size_t auth_end = find_auth_end(client, buffer, &lines_skipped);
                 client->auth_requests += lines_skipped;
@@ -139,7 +150,7 @@ bool side_in_cb(GSocket *socket, GIOCondition condition, void *user_data) {
                     side->side_closed();
                     break;
                 }
-            }else if(side == client->bus_side){
+            }else if(side == &client->bus_side){
                 size_t remaining=buffer->pos;
                 uint8_t *line_start = buffer->data.data();
                 while (remaining>0){
@@ -171,7 +182,7 @@ bool side_in_cb(GSocket *socket, GIOCondition condition, void *user_data) {
 
                         buffer->pos = buffer->size = line_start - buffer->data.data();
                         if (remaining > 0)
-                            client->bus_side->extra_input_data.assign(line_start, line_start + remaining);
+                            client->bus_side.extra_input_data.assign(line_start, line_start + remaining);
 
                         break;
                     }
