@@ -8,14 +8,14 @@
 #include <vector>
 #include <list>
 #include "flatpak-proxy.h"
-#include <assert.h>
 
-#include <glibmm.h>
-#include <giomm/init.h>
+//#include <glibmm.h>
+//#include <giomm/init.h>
 #include <giomm/socketservice.h>
 #include <gio/gdbusaddress.h>
 #include <gio/gsocket.h>
 #include <gio/gsocketcontrolmessage.h>
+#include<gio/gunixfdmessage.h>
 
 
 class FlatpakProxyClient;
@@ -44,6 +44,19 @@ typedef enum {
     AUTH_WAITING_FOR_BACKLOG,
     AUTH_COMPLETE,
 } AuthState;
+
+typedef enum {
+    HANDLE_PASS,
+    HANDLE_DENY,
+    HANDLE_HIDE,
+    HANDLE_FILTER_NAME_LIST_REPLY,
+    HANDLE_FILTER_HAS_OWNER_REPLY,
+    HANDLE_FILTER_GET_OWNER_REPLY,
+    HANDLE_VALIDATE_OWN,
+    HANDLE_VALIDATE_SEE,
+    HANDLE_VALIDATE_TALK,
+    HANDLE_VALIDATE_MATCH,
+} BusHandler;//todo realize all methods with it
 
 #define MAX_CLIENT_SERIAL (G_MAXUINT32 - 65536)
 
@@ -77,6 +90,7 @@ public:
     size_t pos;
     bool send_credentials;
     std::vector<uint8_t> data;
+    std::list<GSocketControlMessage*> control_messages;
 
 private:
 
@@ -85,12 +99,12 @@ private:
 
     size_t sent;
     int refcount;
-    std::list<GSocketControlMessage*> control_messages;
 };
 
 class Header {
 public:
     ~Header();
+    void parse(Buffer *buffer); //parse_header
     bool big_endian;
     std::string path;
     std::string interface;
@@ -98,8 +112,8 @@ public:
     std::string error_name;
     std::string destination;
     std::string sender;
+    uint32_t unix_fds;
 private:
-    void parse(Buffer *buffer); //parse_header
     bool client_message_generates_reply();
 //    void parse_header (Buffer *buffer, GError **error);
     void print_outgoing();
@@ -112,7 +126,6 @@ private:
     std::string signature;
     bool has_reply_serial;
     uint32_t reply_serial;
-    uint32_t unix_fds;
 };
 
 class ProxySide {
@@ -130,17 +143,15 @@ public:
     bool closed;
     bool got_first_byte;
     std::vector<uint8_t> extra_input_data;
-
+    std::list<GSocketControlMessage*> control_messages;
 private:
-
     void stop_reading();
     ProxySide* get_other_side();
 
     GSource *in_source;
     GSource *out_source;
 
-    std::list<std::unique_ptr<Buffer>> buffers;
-    std::list<std::shared_ptr<void>> control_messages;
+    std::list<std::unique_ptr<Buffer>> buffers;//todo: change, causes an error
 
     std::unordered_map<uint32_t, ExpectedReplyType> expected_replies;
 };
@@ -151,8 +162,10 @@ public:
             FlatpakProxy *proxy,
             Glib::RefPtr<Gio::SocketConnection> client_conn
     );
-
     ~FlatpakProxyClient();
+
+    void got_buffer_from_client(Buffer* buffer);
+    void got_buffer_from_bus(Buffer* buffer);
 
     ProxySide bus_side;
     ProxySide client_side;
@@ -168,7 +181,6 @@ private:
                                  FlatpakPolicy policy);
 
     FlatpakPolicy get_max_policy(std::string source);
-
     FlatpakPolicy get_max_policy_and_matched(std::string source,
                                              std::vector<Filter *> *matched_filters);
     uint32_t hello_serial;
@@ -187,6 +199,7 @@ public:
     std::list<FlatpakProxyClient *> clients;
     std::unordered_map<std::string, std::vector<Filter *>> filters;
     bool log_messages;
+    bool filter;
 private:
     void set_filter(bool filter);
 
@@ -213,7 +226,6 @@ private:
     Glib::RefPtr<Gio::SocketService> parent;
     std::string socket_path;
     std::string dbus_address;
-    bool filter;
     bool sloppy_names;
 };
 

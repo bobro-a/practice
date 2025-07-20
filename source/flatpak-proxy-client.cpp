@@ -164,6 +164,70 @@ FlatpakProxyClient::~FlatpakProxyClient() {
     unique_id_owned_names.clear();
 }
 
+std::list<GSocketControlMessage*>
+side_get_n_unix_fds (ProxySide *side, int n_fds){
+    while (!side->control_messages.empty()){
+        auto it = side->control_messages.begin();
+        GSocketControlMessage *msg = *it;
+        if (G_IS_UNIX_FD_MESSAGE (msg)){
+            GUnixFDMessage *fd_msg = G_UNIX_FD_MESSAGE(msg);
+            GUnixFDList *fd_list = g_unix_fd_message_get_fd_list(fd_msg);
+            int len = g_unix_fd_list_get_length(fd_list);
+            if (len != n_fds) {
+                std::cerr << "Not right nr of fds in socket message\n";
+                return {};
+            }
+            side->control_messages.erase(it);
+            return {msg};
+        }
+        g_object_unref(msg);
+        side->control_messages.erase(it);
+    }
+    return {};
+}
+
+bool
+update_socket_messages (ProxySide *side, Buffer *buffer, Header *header)
+{
+    side->control_messages.splice(side->control_messages.end(), buffer->control_messages);
+    buffer->control_messages.clear();
+    if (header->unix_fds > 0)
+    {
+        buffer->control_messages = side_get_n_unix_fds (side, header->unix_fds);
+        if (buffer->control_messages.empty())
+        {
+            std::cerr<<"Not enough fds for message\n";
+            side->side_closed();
+            buffer->unref();
+            return false;
+        }
+    }
+    return true;
+}
+
+void FlatpakProxyClient::got_buffer_from_client(Buffer* buffer){
+    ExpectedReplyType expecting_reply = EXPECTED_REPLY_NONE;
+    auto side=this->client_side;
+    if (auth_state == AUTH_COMPLETE && proxy->filter){
+        Header header;
+        try {
+            header.parse(buffer);
+        }catch(std::exception &ex){
+            std::cerr<<"Invalid message header format from client: "<<ex.what()<<"\n";
+            side.side_closed();
+            buffer->unref();
+            return;
+        }
+        if (!update_socket_messages (&side, buffer, &header))
+            return;
+        //todo
+    }
+}
+
+void FlatpakProxyClient::got_buffer_from_bus(Buffer* buffer){
+
+}
+
 void FlatpakProxyClient::add_unique_id_owned_name(std::string unique_id, std::string owned_name) {
     bool already_added;
     already_added = (unique_id_owned_names.find(unique_id) != unique_id_owned_names.end());
