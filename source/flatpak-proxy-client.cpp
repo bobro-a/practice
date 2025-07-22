@@ -382,7 +382,7 @@ void FlatpakProxyClient::got_buffer_from_client(Buffer *buffer) {
                 if (!validate_arg0_name(buffer, FLATPAK_POLICY_SEE, nullptr)) {
                     delete buffer;
                     if (handler == HANDLE_FILTER_GET_OWNER_REPLY)
-                        buffer = get_error_for_roundtrip (client, header,
+//                        buffer = get_error_for_roundtrip (client, header,
                                                           "org.freedesktop.DBus.Error.NameHasNoOwner");
                 }//todo
         }
