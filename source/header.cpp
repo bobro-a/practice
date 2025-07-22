@@ -206,37 +206,41 @@ bool Header::client_message_generates_reply() {
 }
 
 
+
 void Header::print_outgoing() {
+    std::cerr<<"print_outgoing begin\n";
     switch (type) {
         case G_DBUS_MESSAGE_TYPE_METHOD_CALL:
             //todo debug: check if you can't print the values right away, because they're empty.
-            std::cout << "C" << serial <<
+            std::cerr << "C" << serial <<
                       ": -> " << (!destination.empty() ? destination : "(no dest)") <<
                       " call " << (!interface.empty() ? interface : "") <<
                       "." << (!member.empty() ? member : "") <<
                       " at " << (!path.empty() ? path : "") << "\n";
             break;
         case G_DBUS_MESSAGE_TYPE_METHOD_RETURN:
-            std::cout << "C" << serial << ": -> " <<
+            std::cerr << "C" << serial << ": -> " <<
                       (!destination.empty() ? destination : "(no dest)") <<
                       " return from B" << reply_serial << "\n";
             break;
         case G_DBUS_MESSAGE_TYPE_ERROR:
-            std::cout << "C" << serial << ": -> " <<
+            std::cerr << "C" << serial << ": -> " <<
                       (!destination.empty() ? destination : "(no dest)") <<
                       " return error " << (!error_name.empty() ? error_name : "(no error)") <<
                       " from B" << reply_serial << "\n";
             break;
         case G_DBUS_MESSAGE_TYPE_SIGNAL:
-            std::cout << "C" << serial <<
+            std::cerr << "C" << serial <<
                       ": -> " << (!destination.empty() ? destination : "all") <<
                       " signal " << (!interface.empty() ? interface : "") <<
                       "." << (!member.empty() ? member : "") <<
                       " at " << (!path.empty() ? path : "") << "\n";
             break;
         default:
-            std::cout << "unknown message type\n";
+            std::cerr << "unknown message type\n";
     }
+
+    std::cerr<<"print_outgoing end\n";
 }
 
 void Header::print_incoming() {

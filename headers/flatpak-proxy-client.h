@@ -7,17 +7,18 @@
 #include <string>
 #include <vector>
 #include <list>
-#include "flatpak-proxy.h"
+//#include "flatpak-proxy.h"
 
-//#include <glibmm.h>
-//#include <giomm/init.h>
+#include <glibmm.h>
 #include <giomm/socketservice.h>
 #include <gio/gdbusaddress.h>
 #include <gio/gsocket.h>
 #include <gio/gsocketcontrolmessage.h>
-#include<gio/gunixfdmessage.h>
+#include <gio/gunixfdmessage.h>
+#include <gio/gunixfdlist.h>
 
 
+class FlatpakProxy;
 class FlatpakProxyClient;
 class ProxySide;
 class Header;
@@ -57,6 +58,13 @@ typedef enum {
     HANDLE_VALIDATE_TALK,
     HANDLE_VALIDATE_MATCH,
 } BusHandler;//todo realize all methods with it
+
+typedef enum {
+    FLATPAK_POLICY_NONE,
+    FLATPAK_POLICY_SEE,
+    FLATPAK_POLICY_TALK,
+    FLATPAK_POLICY_OWN
+} FlatpakPolicy;
 
 #define MAX_CLIENT_SERIAL (G_MAXUINT32 - 65536)
 
@@ -156,7 +164,7 @@ private:
     GSource *in_source;
     GSource *out_source;
 
-    std::list<std::unique_ptr<Buffer>> buffers;//todo: change, causes an error
+    std::list<Buffer*> buffers;
 };
 
 class FlatpakProxyClient {
@@ -202,26 +210,20 @@ public:
     ~FlatpakProxy();
     std::list<FlatpakProxyClient *> clients;
     std::unordered_map<std::string, std::vector<Filter *>> filters;
+
+    void add_policy(std::string name, bool name_is_subtree, FlatpakPolicy policy);
+    void add_call_rule(std::string name, bool name_is_subtree, std::string rule);
+    void add_broadcast_rule(std::string name, bool name_is_subtree, std::string rule);
+    bool start();
+    void stop();
+    void set_filter(bool filter);
+    void set_sloppy_names(bool sloopy_names);
+    void set_log_messages(bool log);
     bool log_messages;
     bool filter;
 private:
-    void set_filter(bool filter);
-
-    void set_sloppy_names(bool sloopy_names);
-
-    void set_log_messages(bool log);
-
     void add_filter(Filter *filter);
 
-    void add_policy(std::string name, bool name_is_subtree, FlatpakPolicy policy);
-
-    void add_call_rule(std::string name, bool name_is_subtree, std::string rule);
-
-    void add_broadcast_rule(std::string name, bool name_is_subtree, std::string rule);
-
-    bool start();
-
-    void stop();
 
     bool incoming_connection(
             const Glib::RefPtr<Gio::SocketConnection> &connection,

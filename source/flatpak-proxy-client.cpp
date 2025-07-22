@@ -1,4 +1,5 @@
 #include "headers/flatpak-proxy-client.h"
+#include "headers/utils.h"
 
 
 void FlatpakProxy::set_filter(bool filter) {
@@ -39,6 +40,7 @@ void FlatpakProxy::add_broadcast_rule(std::string name, bool name_is_subtree, st
 
 
 bool FlatpakProxy::start() {
+    std::cerr << "[proxy] start() begin for socket: " << socket_path << "\n";
     std::filesystem::remove(socket_path);
 
     GError *error = nullptr;
@@ -76,6 +78,7 @@ void FlatpakProxy::stop() {
 void client_connected_to_dbus(GObject *source_object,
                               GAsyncResult *res,
                               void *user_data) {
+    std::cout<< "client_connected_to_dbus begin\n";
     FlatpakProxyClient *client = static_cast<FlatpakProxyClient *>(user_data);
     GError *error = nullptr;
 
@@ -99,7 +102,9 @@ bool FlatpakProxy::incoming_connection(
         const Glib::RefPtr<Gio::SocketConnection> &connection,
         const Glib::RefPtr<Glib::Object> &source_object
 ) {
+    std::cout<<"incoming_connection\n";
     auto client = new FlatpakProxyClient(this, connection);
+    client->client_side.start_reading();
     connection->get_socket()->set_blocking(false);
 
     g_dbus_address_get_stream(dbus_address.c_str(),
@@ -146,7 +151,20 @@ FlatpakProxyClient::FlatpakProxyClient(FlatpakProxy *proxy,
 
     client_side.connection = G_SOCKET_CONNECTION(g_object_ref(client_conn->gobj()));
     proxy->clients.push_back(this);
+
     last_fake_serial = MAX_CLIENT_SERIAL;
+
+
+//    GSocketConnection *conn = client_conn->gobj();
+//    client_side.connection = G_SOCKET_CONNECTION(g_object_ref(client_conn->gobj()));
+//    client_side.start_reading();  // <-- вот это главное
+
+//    g_io_channel_set_buffered(channel, FALSE);
+//    g_io_add_watch(channel,
+//                   static_cast<GIOCondition>(G_IO_IN | G_IO_HUP | G_IO_ERR),
+//                   reinterpret_cast<GIOFunc>(side_in_cb),
+//                   &client_side);
+    std::cerr << "FlatpakProxyClient end\n";
 }
 
 FlatpakProxyClient::~FlatpakProxyClient() {
@@ -169,7 +187,7 @@ side_get_n_unix_fds(ProxySide *side, int n_fds) {
     while (!side->control_messages.empty()) {
         auto it = side->control_messages.begin();
         GSocketControlMessage *msg = *it;
-        if (G_IS_UNIX_FD_MESSAGE (msg)) {
+        if (G_IS_UNIX_FD_MESSAGE(msg)) {
             GUnixFDMessage *fd_msg = G_UNIX_FD_MESSAGE(msg);
             GUnixFDList *fd_list = g_unix_fd_message_get_fd_list(fd_msg);
             int len = g_unix_fd_list_get_length(fd_list);
@@ -330,7 +348,7 @@ bool FlatpakProxyClient::validate_arg0_name(Buffer *buffer, FlatpakPolicy requir
         std::string name = g_variant_get_string(arg0, nullptr);
         auto name_policy = get_max_policy(name);
         if (has_policy) *has_policy = name_policy;
-        if (name_policy >= required_policy){
+        if (name_policy >= required_policy) {
             g_variant_unref(arg0);
             g_object_unref(message);
             return true;
@@ -347,6 +365,7 @@ bool FlatpakProxyClient::validate_arg0_name(Buffer *buffer, FlatpakPolicy requir
 
 
 void FlatpakProxyClient::got_buffer_from_client(Buffer *buffer) {
+    std::cerr << "[got_buffer_from_client] called, auth_state = " << auth_state << "\n";
     ExpectedReplyType expecting_reply = EXPECTED_REPLY_NONE;
     auto side = this->client_side;
     if (auth_state == AUTH_COMPLETE && proxy->filter) {
@@ -368,8 +387,10 @@ void FlatpakProxyClient::got_buffer_from_client(Buffer *buffer) {
             buffer->unref();
             return;
         }
-        if (proxy->log_messages)
+        if (proxy->log_messages) {
+            std::cout<<"log_message in FlatpakProxyClient::got_buffer_from_client\n";
             header.print_outgoing();
+        }
         if (header.is_dbus_method_call() &&
             header.member == "Hello") {
             expecting_reply = EXPECTED_REPLY_HELLO;
@@ -379,14 +400,15 @@ void FlatpakProxyClient::got_buffer_from_client(Buffer *buffer) {
         switch (handler) {
             case HANDLE_FILTER_HAS_OWNER_REPLY:
             case HANDLE_FILTER_GET_OWNER_REPLY:
-                if (!validate_arg0_name(buffer, FLATPAK_POLICY_SEE, nullptr)) {
-                    delete buffer;
-                    if (handler == HANDLE_FILTER_GET_OWNER_REPLY)
+//                if (!validate_arg0_name(buffer, FLATPAK_POLICY_SEE, nullptr)) {
+//                    delete buffer;
+//                    if (handler == HANDLE_FILTER_GET_OWNER_REPLY)
 //                        buffer = get_error_for_roundtrip (client, header,
-                                                          "org.freedesktop.DBus.Error.NameHasNoOwner");
-                }//todo
+//                                                          "org.freedesktop.DBus.Error.NameHasNoOwner");
+//                }//todo
+            default:
+                break;
         }
-
     }
 }
 
