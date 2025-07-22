@@ -237,7 +237,7 @@ bool filter_matches(Filter *filter,//todo: later make Filter methods
     return true;
 }
 
-bool any_filter_matches(std::list<Filter *> *filters,
+bool any_filter_matches(std::vector<Filter *> *filters,
                         FilterTypeMask type,
                         std::string &path,
                         std::string &interface,
@@ -261,7 +261,7 @@ get_dbus_method_handler(FlatpakProxyClient *client, Header *header) {
 
         return HANDLE_PASS;
     }
-    std::list<Filter *> filters;
+    std::vector<Filter *> filters;
     FlatpakPolicy policy = client->get_max_policy_and_matched(header->destination, &filters);
     if (policy < FLATPAK_POLICY_SEE) return HANDLE_HIDE;
     if (policy < FLATPAK_POLICY_TALK) return HANDLE_DENY;
@@ -311,10 +311,40 @@ get_dbus_method_handler(FlatpakProxyClient *client, Header *header) {
             method == "ListActivatableNames")
             return HANDLE_FILTER_NAME_LIST_REPLY;
 
-        std::cerr<<"Unknown bus method "<<method<<"\n";
+        std::cerr << "Unknown bus method " << method << "\n";
     }
     return HANDLE_DENY;
 }
+
+bool FlatpakProxyClient::validate_arg0_name(Buffer *buffer, FlatpakPolicy required_policy, FlatpakPolicy *has_policy) {
+    GDBusMessage *message = g_dbus_message_new_from_blob(buffer->data.data(), buffer->size,
+                                                         static_cast<GDBusCapabilityFlags>(0), nullptr);
+    GVariant *body;
+    GVariant *arg0;
+    if (has_policy)
+        *has_policy = FLATPAK_POLICY_NONE;
+    if (message != nullptr &&
+        (body = g_dbus_message_get_body(message)) != nullptr &&
+        (arg0 = g_variant_get_child_value(body, 0)) != nullptr &&
+        g_variant_is_of_type(arg0, G_VARIANT_TYPE_STRING)) {
+        std::string name = g_variant_get_string(arg0, nullptr);
+        auto name_policy = get_max_policy(name);
+        if (has_policy) *has_policy = name_policy;
+        if (name_policy >= required_policy){
+            g_variant_unref(arg0);
+            g_object_unref(message);
+            return true;
+        }
+
+        if (proxy->log_messages)
+            std::cout << "Filtering message due to arg0 " << name << ", policy: " << name_policy << " (required "
+                      << required_policy << ")\n";
+    }
+    g_variant_unref(arg0);
+    g_object_unref(message);
+    return false;
+}
+
 
 void FlatpakProxyClient::got_buffer_from_client(Buffer *buffer) {
     ExpectedReplyType expecting_reply = EXPECTED_REPLY_NONE;
@@ -346,10 +376,15 @@ void FlatpakProxyClient::got_buffer_from_client(Buffer *buffer) {
             hello_serial = header.serial;
         }
         handler = get_dbus_method_handler(this, &header);
-        switch (handler){
+        switch (handler) {
             case HANDLE_FILTER_HAS_OWNER_REPLY:
             case HANDLE_FILTER_GET_OWNER_REPLY:
-//todo
+                if (!validate_arg0_name(buffer, FLATPAK_POLICY_SEE, nullptr)) {
+                    delete buffer;
+                    if (handler == HANDLE_FILTER_GET_OWNER_REPLY)
+                        buffer = get_error_for_roundtrip (client, header,
+                                                          "org.freedesktop.DBus.Error.NameHasNoOwner");
+                }//todo
         }
 
     }

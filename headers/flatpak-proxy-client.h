@@ -186,6 +186,7 @@ private:
                                  FlatpakPolicy policy);
 
     FlatpakPolicy get_max_policy(std::string source);
+    bool validate_arg0_name (Buffer *buffer, FlatpakPolicy required_policy, FlatpakPolicy *has_policy);
     uint32_t hello_serial;
     uint32_t last_fake_serial;
     std::unordered_map<uint32_t, GDBusMessage *> rewrite_reply;//todo replace GDBusMessage
