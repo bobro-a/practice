@@ -63,10 +63,12 @@ bool FlatpakProxy::start() {
         g_error_free(error);
         return false;
     }
+
     parent->signal_incoming().connect(
             sigc::mem_fun(*this, &FlatpakProxy::incoming_connection)
     );
     parent->start();
+    std::cerr<<"[proxy] start() end\n";
     return true;
 }
 
@@ -89,23 +91,22 @@ void client_connected_to_dbus(GObject *source_object,
         delete client;
         return;
     }
-
     GSocketConnection *connection = G_SOCKET_CONNECTION (stream);
     g_socket_set_blocking(g_socket_connection_get_socket(connection), FALSE);
     client->bus_side.connection = connection;
-
+    std::cout<<"start_reading to client_side\n";
     client->client_side.start_reading();
+    std::cout<<"start_reading to bus_side\n";
     client->bus_side.start_reading();
 }
 
-bool FlatpakProxy::incoming_connection(
-        const Glib::RefPtr<Gio::SocketConnection> &connection,
+bool FlatpakProxy::incoming_connection(const Glib::RefPtr<Gio::SocketConnection> &connection,
         const Glib::RefPtr<Glib::Object> &source_object
 ) {
     std::cout<<"incoming_connection\n";
     auto client = new FlatpakProxyClient(this, connection);
-    client->client_side.start_reading();
-    connection->get_socket()->set_blocking(false);
+//    client->client_side.start_reading();
+//    connection->get_socket()->set_blocking(false);
 
     g_dbus_address_get_stream(dbus_address.c_str(),
                               nullptr,
@@ -130,6 +131,7 @@ FlatpakProxy::~FlatpakProxy() {
 }
 
 FlatpakProxy::FlatpakProxy(std::string dbus_address, std::string socket_path) {
+
     this->dbus_address = dbus_address;
     this->socket_path = socket_path;
     log_messages = filter = sloppy_names = false;
@@ -149,25 +151,18 @@ FlatpakProxyClient::FlatpakProxyClient(FlatpakProxy *proxy,
         client_side(ProxySide(this, false)),
         bus_side(ProxySide(this, true)) {
 
+    std::cerr << "FlatpakProxyClient start\n";
+
     client_side.connection = G_SOCKET_CONNECTION(g_object_ref(client_conn->gobj()));
     proxy->clients.push_back(this);
 
     last_fake_serial = MAX_CLIENT_SERIAL;
 
-
-//    GSocketConnection *conn = client_conn->gobj();
-//    client_side.connection = G_SOCKET_CONNECTION(g_object_ref(client_conn->gobj()));
-//    client_side.start_reading();  // <-- вот это главное
-
-//    g_io_channel_set_buffered(channel, FALSE);
-//    g_io_add_watch(channel,
-//                   static_cast<GIOCondition>(G_IO_IN | G_IO_HUP | G_IO_ERR),
-//                   reinterpret_cast<GIOFunc>(side_in_cb),
-//                   &client_side);
     std::cerr << "FlatpakProxyClient end\n";
 }
 
 FlatpakProxyClient::~FlatpakProxyClient() {
+    std::cerr<<"~FlatpakProxyClient()\n";
     if (proxy) {
         proxy->clients.remove(this);
     }
@@ -180,6 +175,7 @@ FlatpakProxyClient::~FlatpakProxyClient() {
     get_owner_reply.clear();
     unique_id_policy.clear();
     unique_id_owned_names.clear();
+    std::cerr<<"~FlatpakProxyClient() end\n";
 }
 
 std::list<GSocketControlMessage *>

@@ -1,12 +1,12 @@
-//#include <vector>
 #include <fstream>
 #include <cstdlib>
-//#include <iostream>
 #include <memory>
 #include <sys/stat.h>
 #include <algorithm>
 #include <glib.h>
 #include <glib-unix.h>
+#include <giomm.h>
+
 
 #include "headers/flatpak-proxy-client.h"
 
@@ -81,7 +81,7 @@ void add_args(const std::vector<uint8_t> &data, std::vector<std::string> &args, 
 }
 
 bool parse_generic_args(std::vector<std::string> &args, size_t &args_i) {
-    std::cout<<"parse_generic_args\n";
+    std::cout << "parse_generic_args\n";
     std::string arg = args[args_i];
     if (arg == "--help")
         usage(EXIT_SUCCESS, &std::cout);
@@ -211,7 +211,7 @@ start_proxy(std::vector<std::string> &args, size_t &args_i) {
         }
     }
     GError *error = NULL;
-    std::cout << "Запуск прокси\n";
+//    std::cout << "Запуск прокси\n";
     if (!proxy->start()) {
         std::cerr << "Failed to start proxy for " << bus_address << ": " << error->message << "\n";
         return false;
@@ -230,17 +230,20 @@ gboolean sync_closed_cb(GIOChannel *, GIOCondition, gpointer) {
 }
 
 int main(int argc, char *argv[]) {
+    Glib::init();
+    Gio::init();
+
     std::vector<std::string> args(argv + 1, argv + argc);
     size_t args_i = 0;
     argv0 = argv[0];
     setlocale(LC_ALL, "");
-    std::cout << "main запустился\n";
+//    std::cout << "main запустился\n";
     if (argc == 1) usage(EXIT_FAILURE, &std::cerr);
 
-    std::cout << "прошло условие\n";
+//    std::cout << "прошло условие\n";
     while (args_i < args.size()) {
         std::string &arg = args[args_i];
-        std::cout<<arg<<"\n";
+        std::cout << arg << "\n";
         if (arg[0] == '-') {
             if (!parse_generic_args(args, args_i)) {
                 std::cout << "1\n";
@@ -252,29 +255,27 @@ int main(int argc, char *argv[]) {
                 return EXIT_FAILURE;
             }
         }
-        std::cout << "test\n";
+//        std::cout << "test\n";
     }
 
     if (proxies.empty()) {
         std::cerr << "No proxies specified\n";
         return EXIT_FAILURE;
     }
-    std::cout<<"условие sync_fd >= 0\n";
     if (sync_fd >= 0) {
-        std::cout<<"условие сработало\n";
+//        std::cout << "условие сработало\n";
         ssize_t written = write(sync_fd, "x", 1);
         if (written == -1) {
             std::cerr << "Failed to write to sync-fd: " << strerror(errno) << "\n";
             return EXIT_FAILURE;
         }
-        std::cout<<"канал\n";
         GIOChannel *sync_channel = g_io_channel_unix_new(sync_fd);
         g_io_add_watch(sync_channel,
                        static_cast<GIOCondition>(G_IO_ERR | G_IO_HUP),
                        sync_closed_cb,
                        NULL);
     }
-    std::cout<<"цикл\n";
+    std::cout << "цикл\n";
     GMainLoop *main_loop = g_main_loop_new(NULL, FALSE);
     g_main_loop_run(main_loop);
     g_main_loop_unref(main_loop);

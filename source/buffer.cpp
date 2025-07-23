@@ -34,10 +34,13 @@ void Buffer::unref() {
 
 bool Buffer::read(ProxySide *side,
                   GSocket *socket) {
+    std::cerr<<"Buffer::read start\n";
     FlatpakProxyClient *client = side->client;
     size_t received = 0;
+
     if (client->auth_state == AUTH_WAITING_FOR_BACKLOG && side == &client->client_side)
         return false;
+
     if (!side->extra_input_data.empty() && client->auth_state == AUTH_COMPLETE) {
         assert(size >= pos);
         received = std::min(size - pos, side->extra_input_data.size());
@@ -57,7 +60,7 @@ bool Buffer::read(ProxySide *side,
         int flags = 0;
         GError *error;
 
-        size_t res = g_socket_receive_message(
+        gssize res = g_socket_receive_message(
                 socket,
                 nullptr,
                 &vec, 1,
@@ -67,17 +70,21 @@ bool Buffer::read(ProxySide *side,
                 nullptr,
                 &error
         );
+        std::cerr << "[Buffer::read] g_socket_receive_message() = " << res << "\n";
+
+
         if (res < 0 && g_error_matches(error, G_IO_ERROR, G_IO_ERROR_WOULD_BLOCK)) {
+            std::cerr<<"res < 0 && g_error_matches(error, G_IO_ERROR, G_IO_ERROR_WOULD_BLOCK)\n";
             g_error_free(error);
             return false;
         }
-
         if (res <= 0) {
             if (res != 0) {
                 std::cerr << "Error reading from socket: " << error->message << "\n";
                 g_error_free(error);
             }
 
+            std::cerr<<"res <= 0\n";
             side->side_closed();
             return false;
         }
@@ -87,6 +94,7 @@ bool Buffer::read(ProxySide *side,
         g_free(messages);
     }
     pos += received;
+    std::cerr<<"Buffer::read end\n";
     return true;
 }
 

@@ -6,15 +6,13 @@
 #define FIND_AUTH_END_ABORT -2
 
 
-
-uint32_t read_uint32(Header* header, uint8_t *ptr) {
+uint32_t read_uint32(Header *header, uint8_t *ptr) {
     return header->big_endian
            ? GUINT32_FROM_BE (*(guint32 *) ptr)
            : GUINT32_FROM_LE (*(guint32 *) ptr);
 }
 
-uint32_t align_by_8 (uint32_t offset)
-{
+uint32_t align_by_8(uint32_t offset) {
     return (offset + 8 - 1) & ~(8 - 1);
 }
 
@@ -24,10 +22,13 @@ align_by_4(uint32_t offset) {
 }
 
 bool auth_line_is_begin(std::string line) {
+    std::cerr<<"auth_line_is_begin start\n";
     std::string auth_beg = "BEGIN";
     if (!line.starts_with(auth_beg)) return false;
     if (line.size() == auth_beg.size()) return true;
     char ch = line[auth_beg.size()];
+
+    std::cerr<<"auth_line_is_begin end\n";
     return ch == ' ' || ch == '\t';
 };
 
@@ -82,22 +83,25 @@ size_t find_auth_end(FlatpakProxyClient *client, Buffer *buffer, size_t *out_lin
 }
 
 gboolean side_in_cb(GSocket *socket, GIOCondition condition, gpointer user_data) {
-    std::cerr<<"side_in_cb\n";
+    std::cerr << "side_in_cb\n";
     ProxySide *side = static_cast<ProxySide *>(user_data);
     FlatpakProxyClient *client = side->client;
     Buffer *buffer;
-    bool wake_client_reader=false;
-
+    bool wake_client_reader = false;
     while (!side->closed) {
+        std::cerr<<"[side_in_cb] side->got_first_byte = "<<side->got_first_byte<<"\n";
         buffer = (!side->got_first_byte) ? new Buffer(1, nullptr) :
                  client->auth_state != AUTH_COMPLETE ? new Buffer(256, nullptr) :
                  side->current_read_buffer;
         if (!buffer->read(side, socket)) {
             if (buffer != side->current_read_buffer)
                 buffer->unref();
+            std::cerr<<"break\n";
             break;
         }
+        std::cerr << "read buffer\n";
         if (client->auth_state != AUTH_COMPLETE) {
+            std::cerr << "client->auth_state != AUTH_COMPLETE\n";
             if (buffer->pos == 0) {
                 buffer->unref();
                 continue;
@@ -108,7 +112,7 @@ gboolean side_in_cb(GSocket *socket, GIOCondition condition, gpointer user_data)
                 buffer->send_credentials = side->got_first_byte = true;
             else if (side == &client->client_side && client->auth_state == AUTH_WAITING_FOR_BEGIN) {
                 size_t lines_skipped = 0;
-                size_t auth_end = find_auth_end(client, buffer, &lines_skipped);
+                long auth_end = find_auth_end(client, buffer, &lines_skipped);
                 client->auth_requests += lines_skipped;
                 if (auth_end >= 0) {
                     new_auth_state = AUTH_COMPLETE;
@@ -117,31 +121,35 @@ gboolean side_in_cb(GSocket *socket, GIOCondition condition, gpointer user_data)
                             client->auth_requests == client->auth_replies ? AUTH_COMPLETE : AUTH_WAITING_FOR_BACKLOG;
                     size_t extra_data = buffer->pos - auth_end;
                     buffer->size = buffer->pos = auth_end;
-                    if (extra_data > 0) side->extra_input_data.assign(buffer->data.begin() + auth_end,
-                                                                      buffer->data.begin() + auth_end + extra_data);} else if (auth_end == FIND_AUTH_END_ABORT){
+                    if (extra_data > 0)
+                        side->extra_input_data.assign(buffer->data.begin() + auth_end,
+                                                      buffer->data.begin() + auth_end + extra_data);
+                } else if (auth_end == FIND_AUTH_END_ABORT) {
+                    std::cerr << "[proxy] AUTH failed: invalid line\n";
                     buffer->unref();
                     if (client->proxy->log_messages)
-                        std::cout<<"Invalid AUTH line, aborting\n";
-                    side->side_closed();
+                        std::cout << "Invalid AUTH line, aborting\n";
+//       side->side_closed(); todo  uncomment
+                    client->auth_state = AUTH_COMPLETE;//todo delete
                     break;
                 }
-            }else if(side == &client->bus_side){
-                size_t remaining=buffer->pos;
+            } else if (side == &client->bus_side) {
+                size_t remaining = buffer->pos;
                 uint8_t *line_start = buffer->data.data();
-                while (remaining>0){
-                    if (client->auth_replies == client->auth_requests){
+                while (remaining > 0) {
+                    if (client->auth_replies == client->auth_requests) {
                         buffer->unref();
                         if (client->proxy->log_messages)
-                            std::cout<<"Unexpected auth reply line from bus, aborting\n";
+                            std::cout << "Unexpected auth reply line from bus, aborting\n";
                         side->side_closed();
                         break;
                     }
                     size_t rel_offset = find_auth_line_end(
                             std::vector<uint8_t>(line_start, line_start + remaining));
                     uint8_t *line_end;
-                    if (rel_offset==static_cast<size_t>(-1)){
+                    if (rel_offset == static_cast<size_t>(-1)) {
                         line_end = line_start + remaining;
-                    }else{
+                    } else {
                         line_end = line_start + rel_offset;
                         ++client->auth_replies;
                         line_end += strlen(AUTH_LINE_SENTINEL);
@@ -150,8 +158,7 @@ gboolean side_in_cb(GSocket *socket, GIOCondition condition, gpointer user_data)
                     line_start = line_end;
 
                     if (client->auth_state == AUTH_WAITING_FOR_BACKLOG &&
-                        client->auth_replies == client->auth_requests)
-                    {
+                        client->auth_replies == client->auth_requests) {
                         new_auth_state = AUTH_COMPLETE;
                         wake_client_reader = true;
 
@@ -163,7 +170,7 @@ gboolean side_in_cb(GSocket *socket, GIOCondition condition, gpointer user_data)
                     }
                 }
             }
-//            side->got_buffer_from_side(buffer);
+            side->got_buffer_from_side(buffer);
             client->auth_state = new_auth_state;
             std::cerr << "[side_in_cb] auth_state -> " << new_auth_state << "\n";
 
@@ -172,5 +179,6 @@ gboolean side_in_cb(GSocket *socket, GIOCondition condition, gpointer user_data)
             break;
         }
     }
+    std::cerr<<"side_in_cb end\n";
     return true;
 }

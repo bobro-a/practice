@@ -225,8 +225,7 @@ private:
     void add_filter(Filter *filter);
 
 
-    bool incoming_connection(
-            const Glib::RefPtr<Gio::SocketConnection> &connection,
+    bool incoming_connection(const Glib::RefPtr<Gio::SocketConnection> &connection,
             const Glib::RefPtr<Glib::Object> &source_object
     );
     Glib::RefPtr<Gio::SocketService> parent;

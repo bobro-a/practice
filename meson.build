@@ -9,7 +9,7 @@ project(
 )
 
 glib_dep = dependency('glibmm-2.4', version : '>=2.64')
-gio_dep = dependency('giomm-2.4', version : '>=2.64')
+gio_dep = dependency('giomm-2.4', version : '>=2.66')
 gio_unix_dep = dependency('gio-unix-2.0', required: true)
 common_deps = [glib_dep, gio_dep,gio_unix_dep]
 
