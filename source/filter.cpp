@@ -1,39 +1,42 @@
-#include "headers/flatpak-proxy-client.h"
+#include "../headers/flatpak-proxy-client.h"
 
-Filter::Filter(std::string name, bool name_is_subtree, FlatpakPolicy policy) {
-    this->name = name;
-    this->name_is_subtree = name_is_subtree;
-    this->policy = policy;
-    this->types = FILTER_TYPE_ALL;
+Filter::Filter(const std::string& name, bool name_is_subtree, FlatpakPolicy policy) :
+    name(name),
+    name_is_subtree(name_is_subtree),
+    policy(policy),
+    types(FILTER_TYPE_ALL),
+    path_is_subtree(false) {
 }
 
-Filter::Filter(std::string name, bool name_is_subtree, FilterTypeMask types, std::string rule) {
-    this->name = name;
-    this->name_is_subtree = name_is_subtree;
-    this->policy = FLATPAK_POLICY_TALK;
-    this->types = types;
-    size_t pos = 0;
-    pos = rule.find('@');
-    if (pos != std::string::npos && pos + 1 < rule.size()) {
-        this->path = rule.substr(pos + 1);
-        if (this->path.ends_with("/*")) {
-            this->path_is_subtree = true;
-            this->path[this->path.size() - 2] = 0;
+Filter::Filter(const std::string& name, bool name_is_subtree, FilterTypeMask types, const std::string& rule) :
+    name(name),
+    name_is_subtree(name_is_subtree),
+    policy(FLATPAK_POLICY_TALK),
+    types(types),
+    path_is_subtree(false) {
+    
+    size_t at_pos = rule.find('@');
+    size_t method_end = (at_pos != std::string::npos) ? at_pos : rule.size();
+    
+    if (at_pos != std::string::npos && at_pos + 1 < rule.size()) {
+        path = rule.substr(at_pos + 1);
+        if (path.ends_with("/*")) {
+            path_is_subtree = true;
+            path.resize(path.size() - 2);
         }
     }
-    size_t method_end = (pos == std::string::npos ? pos : rule.size());
-    if (method_end) {
+    
+    if (method_end > 0) {
         if (rule[0] == '*') {
-
         } else {
-            this->interface = rule.substr(0, method_end);
-            size_t dot = this->interface.rfind('.');
+            interface = rule.substr(0, method_end);
+            size_t dot = interface.rfind('.');
             if (dot != std::string::npos) {
-                std::string member = this->interface.substr(dot + 1);
-                if (member != "*") {
-                    this->member = member;
+                std::string potential_member = interface.substr(dot + 1);
+                if (potential_member != "*") {
+                    member = potential_member;
                 }
-                this->interface.resize(dot);
+                interface.resize(dot);
             }
         }
     }

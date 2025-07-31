@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 #include <list>
-//#include "flatpak-proxy.h"
+#include <memory>
 
 #include <glibmm.h>
 #include <giomm/socketservice.h>
@@ -16,7 +16,7 @@
 #include <gio/gsocketcontrolmessage.h>
 #include <gio/gunixfdmessage.h>
 #include <gio/gunixfdlist.h>
-
+#include <gio/gunixconnection.h>
 
 class FlatpakProxy;
 class FlatpakProxyClient;
@@ -57,7 +57,7 @@ typedef enum {
     HANDLE_VALIDATE_SEE,
     HANDLE_VALIDATE_TALK,
     HANDLE_VALIDATE_MATCH,
-} BusHandler;//todo realize all methods with it
+} BusHandler;
 
 typedef enum {
     FLATPAK_POLICY_NONE,
@@ -70,9 +70,9 @@ typedef enum {
 
 class Filter {
 public:
-    Filter(std::string name, bool name_is_subtree, FlatpakPolicy policy);
-
-    Filter(std::string name, bool name_is_subtree, FilterTypeMask types, std::string rule);
+    Filter(const std::string& name, bool name_is_subtree, FlatpakPolicy policy);
+    Filter(const std::string& name, bool name_is_subtree, FilterTypeMask types, const std::string& rule);
+    ~Filter() = default;
 
     std::string name;
     bool name_is_subtree;
@@ -82,155 +82,159 @@ public:
     bool path_is_subtree;
     std::string interface;
     std::string member;
-    //todo: add ordinary methods to class, to make the fields private
 };
 
 class Buffer {
 public:
-    Buffer(size_t size, Buffer* old);
+    Buffer(size_t size, Buffer *old = nullptr);
     ~Buffer();
-    void ref();
-    bool read(ProxySide *side,
-              GSocket   *socket);
 
+    void ref();
     void unref();
+    bool read(ProxySide *side, GSocket *socket);
+    bool write(ProxySide *side, GSocket *socket);
+
     size_t size;
     size_t pos;
+    size_t sent;
     bool send_credentials;
     std::vector<uint8_t> data;
-    std::list<GSocketControlMessage*> control_messages;
+    std::list<GSocketControlMessage *> control_messages;
+    int buffer_id;
 
 private:
-
-    bool write(ProxySide *side,
-               GSocket   *socket);
-
-    size_t sent;
     int refcount;
 };
 
 class Header {
 public:
+    Header() = default;
     ~Header();
-    void parse(Buffer *buffer); //parse_header
+
+    void parse(Buffer *buffer);
     void print_outgoing();
+    void print_incoming();
+    
     bool is_introspection_call();
     bool is_dbus_method_call();
     bool is_for_bus();
-    bool big_endian;
+    bool client_message_generates_reply();
+
+    Buffer *buffer = nullptr;
+    bool big_endian = false;
+    uint8_t type = 0;
+    uint8_t flags = 0;
+    uint32_t length = 0;
+    uint32_t serial = 0;
     std::string path;
     std::string interface;
     std::string member;
     std::string error_name;
     std::string destination;
     std::string sender;
-    uint32_t unix_fds;
-    uint32_t serial;
-    uint8_t type;
-    bool has_reply_serial;
-    uint32_t reply_serial;
-private:
-    bool client_message_generates_reply();
-//    void parse_header (Buffer *buffer, GError **error);
-    void print_incoming();
-
-    Buffer *buffer;
-    uint8_t flags;
-    uint32_t length;
     std::string signature;
+    bool has_reply_serial = false;
+    uint32_t reply_serial = 0;
+    uint32_t unix_fds = 0;
 };
 
 class ProxySide {
 public:
-    ProxySide(FlatpakProxyClient *client, bool is_bus_side);//init_side
-    ~ProxySide();//free_side
+    ProxySide();
+    ProxySide(std::shared_ptr<FlatpakProxyClient> client, bool is_bus_side);
+    ~ProxySide();
+    
+    // Запрещаем копирование
+    ProxySide(const ProxySide&) = delete;
+    ProxySide& operator=(const ProxySide&) = delete;
+    
+    // Разрешаем перемещение
+    ProxySide(ProxySide&& other) noexcept;
+    ProxySide& operator=(ProxySide&& other) noexcept;
+    
     void start_reading();
-    void side_closed();
-    void got_buffer_from_side(Buffer* buffer);
-
-    GSocketConnection *connection;
-    Buffer *current_read_buffer;
-    Buffer header_buffer;
-    FlatpakProxyClient *client;
-    bool closed;
-    bool got_first_byte;
-    std::vector<uint8_t> extra_input_data;
-    std::list<GSocketControlMessage*> control_messages;
-    std::unordered_map<uint32_t, ExpectedReplyType> expected_replies;
-private:
     void stop_reading();
-    ProxySide* get_other_side();
+    void side_closed();
+    ProxySide *get_other_side();
+    void got_buffer_from_side(Buffer *buffer);
 
-    GSource *in_source;
-    GSource *out_source;
+    std::shared_ptr<FlatpakProxyClient> client;
+    GSocketConnection *connection = nullptr;
+    Buffer *current_read_buffer = nullptr;
+    Buffer *header_buffer = nullptr;
+    bool closed = false;
+    bool got_first_byte = false;
+    std::vector<uint8_t> extra_input_data;
+    std::list<GSocketControlMessage *> control_messages;
+    std::unordered_map<uint32_t, ExpectedReplyType> expected_replies;
+    std::list<Buffer *> buffers;
+    GSource *in_source = nullptr;
+    GSource *out_source = nullptr;
 
-    std::list<Buffer*> buffers;
+private:
+    void cleanup();
 };
 
 class FlatpakProxyClient {
 public:
-    FlatpakProxyClient(
-            FlatpakProxy *proxy,
-            Glib::RefPtr<Gio::SocketConnection> client_conn
-    );
+    FlatpakProxyClient(FlatpakProxy* proxy, GSocketConnection *client_conn);
     ~FlatpakProxyClient();
 
-    void got_buffer_from_client(Buffer* buffer);
-    void got_buffer_from_bus(Buffer* buffer);
-    FlatpakPolicy get_max_policy_and_matched(std::string source,
-                                             std::vector<Filter *> *matched_filters);
+    void init_side(std::shared_ptr<FlatpakProxyClient> self, GSocketConnection *client_conn);
+    void got_buffer_from_client(Buffer *buffer);
+    void got_buffer_from_bus(Buffer *buffer);
+    
+    FlatpakPolicy get_max_policy(const std::string& source);
+    FlatpakPolicy get_max_policy_and_matched(const std::string& source, std::vector<Filter *> *matched_filters);
+    Buffer *get_error_for_roundtrip(Header *header, const char *error_name);
+    Buffer *get_bool_reply_for_roundtrip(Header *header, bool val);
+    void add_unique_id_owned_name(const std::string& unique_id, const std::string& owned_name);
 
-    ProxySide bus_side;
     ProxySide client_side;
-    FlatpakProxy *proxy;
-    AuthState auth_state;
-    size_t auth_requests;
+    ProxySide bus_side;
+    FlatpakProxy* proxy;
+    AuthState auth_state = AUTH_WAITING_FOR_BEGIN;
+    size_t auth_requests = 0;
+    size_t auth_replies = 0;
+    uint32_t hello_serial = 0;
+    uint32_t last_fake_serial = MAX_CLIENT_SERIAL;
     std::vector<uint8_t> auth_buffer;
-    size_t auth_replies;
-private:
-    void add_unique_id_owned_name(std::string unique_id, std::string owned_name);
-
-    void update_unique_id_policy(std::string unique_id,
-                                 FlatpakPolicy policy);
-
-    FlatpakPolicy get_max_policy(std::string source);
-    bool validate_arg0_name (Buffer *buffer, FlatpakPolicy required_policy, FlatpakPolicy *has_policy);
-    uint32_t hello_serial;
-    uint32_t last_fake_serial;
-    std::unordered_map<uint32_t, GDBusMessage *> rewrite_reply;//todo replace GDBusMessage
+    std::unordered_map<uint32_t, GDBusMessage *> rewrite_reply;
     std::unordered_map<uint32_t, std::string> get_owner_reply;
 
-    std::unordered_map<std::string, int> unique_id_policy;
+private:
+    void update_unique_id_policy(const std::string& unique_id, FlatpakPolicy policy);
+    bool validate_arg0_name(Buffer *buffer, FlatpakPolicy required_policy, FlatpakPolicy *has_policy);
+    
+    std::unordered_map<std::string, FlatpakPolicy> unique_id_policy;
     std::unordered_map<std::string, std::vector<std::string>> unique_id_owned_names;
 };
 
 class FlatpakProxy {
 public:
-    FlatpakProxy(std::string dbus_address, std::string socket_path);
+    FlatpakProxy(const std::string& dbus_address, const std::string& socket_path);
     ~FlatpakProxy();
-    std::list<FlatpakProxyClient *> clients;
-    std::unordered_map<std::string, std::vector<Filter *>> filters;
 
-    void add_policy(std::string name, bool name_is_subtree, FlatpakPolicy policy);
-    void add_call_rule(std::string name, bool name_is_subtree, std::string rule);
-    void add_broadcast_rule(std::string name, bool name_is_subtree, std::string rule);
+    void add_policy(const std::string& name, bool name_is_subtree, FlatpakPolicy policy);
+    void add_call_rule(const std::string& name, bool name_is_subtree, const std::string& rule);
+    void add_broadcast_rule(const std::string& name, bool name_is_subtree, const std::string& rule);
     bool start();
     void stop();
     void set_filter(bool filter);
-    void set_sloppy_names(bool sloopy_names);
+    void set_sloppy_names(bool sloppy_names);
     void set_log_messages(bool log);
-    bool log_messages;
-    bool filter;
+    bool incoming_connection(GSocketService *service, GSocketConnection *conn);
+
+    std::list<std::shared_ptr<FlatpakProxyClient>> clients;
+    std::unordered_map<std::string, std::vector<Filter *>> filters;
+    bool log_messages = false;
+    bool filter = false;
+    bool sloppy_names = false;
+    std::string dbus_address;
+    std::string auth_guid;
+    GSocketService* service = nullptr;
+
 private:
     void add_filter(Filter *filter);
-
-
-    bool incoming_connection(const Glib::RefPtr<Gio::SocketConnection> &connection,
-            const Glib::RefPtr<Glib::Object> &source_object
-    );
-    Glib::RefPtr<Gio::SocketService> parent;
     std::string socket_path;
-    std::string dbus_address;
-    bool sloppy_names;
 };
-

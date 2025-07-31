@@ -1,27 +1,115 @@
-#include "headers/flatpak-proxy-client.h"
-#include "headers/utils.h"
+#include "../headers/flatpak-proxy-client.h"
+#include "../headers/utils.h"
 
-ProxySide::ProxySide(FlatpakProxyClient *client, bool is_bus_side) :
-        got_first_byte(is_bus_side),
-        client(client),
-        header_buffer(16, nullptr),
-        connection(nullptr),
-        closed(false),
-        in_source(nullptr),
-        out_source(nullptr) {
-    current_read_buffer = &header_buffer;
+ProxySide::ProxySide() : 
+    client(nullptr),
+    connection(nullptr),
+    current_read_buffer(nullptr),
+    header_buffer(nullptr),
+    closed(false),
+    got_first_byte(false),
+    in_source(nullptr),
+    out_source(nullptr) {
+    
+    header_buffer = new Buffer(16, nullptr);
+    current_read_buffer = header_buffer;
+    std::cerr << "ProxySide(): created with header_buffer=" << header_buffer << "\n";
 }
 
+ProxySide::ProxySide(std::shared_ptr<FlatpakProxyClient> client, bool is_bus_side) :
+    client(std::move(client)),
+    connection(nullptr),
+    current_read_buffer(nullptr),
+    header_buffer(nullptr),
+    closed(false),
+    got_first_byte(is_bus_side),
+    in_source(nullptr),
+    out_source(nullptr) {
+    
+    header_buffer = new Buffer(16, nullptr);
+    current_read_buffer = header_buffer;
+    std::cerr << "ProxySide(client): created with header_buffer=" << header_buffer 
+              << " for " << (is_bus_side ? "BUS" : "CLIENT") << " side\n";
+}
 
-ProxySide::~ProxySide() {
+// Конструктор перемещения
+ProxySide::ProxySide(ProxySide&& other) noexcept :
+    client(std::move(other.client)),
+    connection(other.connection),
+    current_read_buffer(other.current_read_buffer),
+    header_buffer(other.header_buffer),
+    closed(other.closed),
+    got_first_byte(other.got_first_byte),
+    extra_input_data(std::move(other.extra_input_data)),
+    control_messages(std::move(other.control_messages)),
+    expected_replies(std::move(other.expected_replies)),
+    buffers(std::move(other.buffers)),
+    in_source(other.in_source),
+    out_source(other.out_source) {
+    
+    // Обнуляем указатели в перемещенном объекте
+    other.connection = nullptr;
+    other.current_read_buffer = nullptr;
+    other.header_buffer = nullptr;
+    other.in_source = nullptr;
+    other.out_source = nullptr;
+    
+    std::cerr << "ProxySide(move): moved header_buffer=" << header_buffer << "\n";
+}
+
+// Оператор перемещения
+ProxySide& ProxySide::operator=(ProxySide&& other) noexcept {
+    if (this != &other) {
+        // Освобождаем текущие ресурсы
+        cleanup();
+        
+        // Перемещаем данные
+        client = std::move(other.client);
+        connection = other.connection;
+        current_read_buffer = other.current_read_buffer;
+        header_buffer = other.header_buffer;
+        closed = other.closed;
+        got_first_byte = other.got_first_byte;
+        extra_input_data = std::move(other.extra_input_data);
+        control_messages = std::move(other.control_messages);
+        expected_replies = std::move(other.expected_replies);
+        buffers = std::move(other.buffers);
+        in_source = other.in_source;
+        out_source = other.out_source;
+        
+        // Обнуляем указатели в перемещенном объекте
+        other.connection = nullptr;
+        other.current_read_buffer = nullptr;
+        other.header_buffer = nullptr;
+        other.in_source = nullptr;
+        other.out_source = nullptr;
+        
+        std::cerr << "ProxySide(operator=): moved header_buffer=" << header_buffer << "\n";
+    }
+    return *this;
+}
+
+void ProxySide::cleanup() {
     if (connection) {
         g_object_unref(connection);
         connection = nullptr;
     }
 
+    if (header_buffer) {
+        header_buffer->unref();
+        header_buffer = nullptr;
+    }
+
     extra_input_data.clear();
 
+    for (auto buffer : buffers) {
+        buffer->unref();
+    }
     buffers.clear();
+
+    for (auto msg : control_messages) {
+        g_object_unref(msg);
+    }
     control_messages.clear();
 
     if (in_source) {
@@ -37,86 +125,67 @@ ProxySide::~ProxySide() {
     expected_replies.clear();
 }
 
-void ProxySide::side_closed(){
-    std::cerr<<"side_closed start\n";
-    std::cerr << "[proxy] Closing side: " << (this == &client->client_side ? "client" : "bus") << "\n";
-    ProxySide* other_side=this->get_other_side();
-    GSocket *other_socket;
+ProxySide::~ProxySide() {
+    std::cerr << "~ProxySide(): destroying with header_buffer=" << header_buffer << "\n";
+    cleanup();
+}
+
+void ProxySide::side_closed() {
     if (closed) return;
 
-    std::cerr<<"connection "<<connection<<"\n";
-    if (connection && G_IS_SOCKET_CONNECTION(connection)) {
-        std::cerr<<"socket 1\n";
-        GSocket *socket = g_socket_connection_get_socket(connection);
-        if (socket && G_IS_SOCKET(socket)) {
-            g_socket_close(socket, nullptr);
-        } else {
-            std::cerr << "Invalid socket (this side)\n";
-        }
-    } else {
-        std::cerr << "Invalid connection (this side)\n";
-    }
-
+    ProxySide *other_side = get_other_side();
+    
+    GSocket *socket = g_socket_connection_get_socket(connection);
+    g_socket_close(socket, nullptr);
     closed = true;
-    std::cerr<<"closed 1\n";
-    std::cerr<<"other_side->connection "<<other_side->connection<<"\n";
-    if (other_side->connection && G_IS_SOCKET_CONNECTION(other_side->connection)) {
 
-        std::cerr<<"other_socket\n";
-        other_socket = g_socket_connection_get_socket(other_side->connection);
+    GSocket *other_socket = g_socket_connection_get_socket(other_side->connection);
 
-        if (!other_side->closed && other_side->buffers.empty()) {
-            if (other_socket && G_IS_SOCKET(other_socket)) {
-                g_socket_close(other_socket, nullptr);
-                other_side->closed = true;
-                std::cerr << "closed 2\n";
-            }else {
-                std::cerr << "Invalid socket (other side)\n";
-            }
+    if (!other_side->closed && other_side->buffers.empty()) {
+        if (other_socket && G_IS_SOCKET(other_socket)) {
+            g_socket_close(other_socket, nullptr);
         }
+        other_side->closed = true;
     }
-    std::cerr<<"other_side done\n";
 
-    if (other_side->closed) delete client;
-    else if (other_socket && G_IS_SOCKET(other_socket)){
-        std::cerr<<"error\n";
+    if (other_side->closed) {
+        client.reset();
+    } else {
         GError *error = nullptr;
         if (!g_socket_shutdown(other_socket, TRUE, FALSE, &error)) {
             std::cerr << "Unable to shutdown read side: " << error->message << "\n";
             g_error_free(error);
         }
-        std::cerr<<"error done\n";
-    } else {
-        std::cerr << "other_socket is null or invalid\n";
     }
-
-    std::cerr<<"side_closed end\n";
 }
 
-void ProxySide::got_buffer_from_side(Buffer* buffer){
-    std::cerr<<"!!!!got_buffer_from_side!!!!!\n";
-    if (this==&client->client_side)
+void ProxySide::got_buffer_from_side(Buffer *buffer) {
+    if (this == &client->client_side) {
         client->got_buffer_from_client(buffer);
-    else client->got_buffer_from_bus(buffer);
+    } else {
+        client->got_buffer_from_bus(buffer);
+    }
 }
 
-ProxySide* ProxySide::get_other_side(){
-    FlatpakProxyClient *client = this->client;
-    if (this==&client->client_side)
-        return &client->bus_side;
-    return &client->client_side;
+ProxySide *ProxySide::get_other_side() {
+    FlatpakProxyClient *client_ptr = client.get();
+    if (this == &client_ptr->client_side) {
+        return &client_ptr->bus_side;
+    }
+    return &client_ptr->client_side;
 }
-
-
 
 void ProxySide::start_reading() {
-    std::cerr << "ProxySide::start_reading begin\n";
     GSocket *socket = g_socket_connection_get_socket(connection);
+    if (!G_IS_SOCKET(socket)) {
+        std::cerr << "[start_reading] invalid socket\n";
+        return;
+    }
+
     in_source = g_socket_create_source(socket, G_IO_IN, nullptr);
     g_source_set_callback(in_source, G_SOURCE_FUNC(side_in_cb), this, nullptr);
     g_source_attach(in_source, nullptr);
     g_source_unref(in_source);
-    std::cerr << "ProxySide::start_reading end\n";
 }
 
 void ProxySide::stop_reading() {
